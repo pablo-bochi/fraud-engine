@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: detection-engine
+  kafka:
+    streams:
+      properties:
+        processing.guarantee: exactly_once_v2
+        consumer.isolation.level: read_committed
+        consumer.auto.offset.reset: earliest
