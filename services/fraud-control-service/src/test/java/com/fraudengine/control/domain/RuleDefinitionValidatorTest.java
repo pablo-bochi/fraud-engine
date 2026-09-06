@@ -49,17 +49,21 @@ class RuleDefinitionValidatorTest {
   }
 
   @Test
-  void rejectsAnAttributeComparisonWithoutAWhitelistedOperator() throws Exception {
+  void rejectsAttributeComparisonBecauseItIsNotExecutableInTheMvp() throws Exception {
     assertThatThrownBy(
             () ->
                 validator.validate(
                     objectMapper.readTree(
                         """
-                        {"type":"ATTRIBUTE_COMPARISON","attribute":"merchantCategory",
-                         "operator":"SCRIPT","value":"travel"}
+                        {
+                          "type":"ATTRIBUTE_COMPARISON",
+                          "attribute":"merchantCategory",
+                          "operator":"EQ",
+                          "value":"travel"
+                        }
                         """)))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("INVALID_ATTRIBUTE_COMPARISON");
+        .hasMessage("UNSUPPORTED_RULE_NODE");
   }
 
   @Test
@@ -94,5 +98,22 @@ class RuleDefinitionValidatorTest {
                         """)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("COMPOSITE_WIDTH_EXCEEDS_LIMIT");
+  }
+
+  @Test
+  void rejectsSumWindowBecauseItIsNotExecutableInTheMvp() throws Exception {
+    assertThatThrownBy(
+            () ->
+                validator.validate(
+                    objectMapper.readTree(
+                        """
+                        {
+                          "type":"SUM_WINDOW",
+                          "windowSeconds":600,
+                          "minimumAmountMinor":10000
+                        }
+                        """)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("UNSUPPORTED_RULE_NODE");
   }
 }
