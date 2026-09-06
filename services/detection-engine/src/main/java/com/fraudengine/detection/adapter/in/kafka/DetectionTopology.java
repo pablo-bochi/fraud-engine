@@ -27,17 +27,19 @@ import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.Stores;
 
 public final class DetectionTopology {
-  public static final String TRANSACTION_TOPIC = "fraud.transactions.v1";
+  public static final String TRANSACTION_TOPIC = "fraud.transaction.received.v1";
   public static final String RULESET_TOPIC = "fraud.ruleset.active.v1";
-  public static final String ASSESSMENT_TOPIC = "fraud.assessments.v1";
-  public static final String ALERT_TOPIC = "fraud.alerts.internal.v1";
-  public static final String NOTIFICATION_TOPIC = "fraud.notifications.requested.v1";
-  public static final String QUARANTINE_TOPIC = "fraud.transactions.quarantined.v1";
-  public static final String INVALID_TOPIC = "fraud.transactions.invalid.v1";
+  public static final String ASSESSMENT_TOPIC = "fraud.assessment.created.v1";
+  public static final String ALERT_TOPIC = "fraud.alert.internal.v1";
+  public static final String NOTIFICATION_TOPIC = "fraud.notification.requested.v1";
+  public static final String QUARANTINE_TOPIC = "fraud.transaction.quarantine.v1";
+  public static final String INVALID_TOPIC = "fraud.transaction.invalid.v1";
   private static final String TRANSACTION_IDENTITIES = "transaction-identities";
   private static final String CUSTOMER_DEDUPLICATION = "customer-deduplication";
   private static final String CUSTOMER_HISTORY = "customer-history";
   static final String ACTIVE_RULESETS_GLOBAL_STORE = "active-rulesets-global-store";
+  private static final JsonSerde<TransactionEvent> TRANSACTION_EVENT_SERDE =
+      new JsonSerde<>(TransactionEvent.class);
   private final AtomicReference<RuleSetSnapshot> activeRuleset = new AtomicReference<>();
   private final StreamsReadinessHealthIndicator readiness;
 
@@ -73,19 +75,8 @@ public final class DetectionTopology {
         Consumed.with(Serdes.String(), new JsonSerde<>(RuleSetSnapshot.class)),
         () -> new RuleSetUpdateProcessor(activeRuleset, readiness));
     KStream<String, ValidationResult> validated =
-        builder.stream(
-                TRANSACTION_TOPIC,
-                Consumed.with(Serdes.String(), new JsonSerde<>(TransactionEvent.class)))
-            .mapValues(
-                (key, event) ->
-                    new ValidationResult(
-                        event,
-                        key != null
-                            && event != null
-                            && key.equals(event.transactionId())
-                            && event.eventId() != null
-                            && event.customerId() != null
-                            && event.occurredAt() != null));
+        builder.stream(TRANSACTION_TOPIC, Consumed.with(Serdes.String(), Serdes.ByteArray()))
+            .mapValues(this::validate);
     validated
         .filter((key, result) -> !result.valid())
         .mapValues(result -> invalid(result.event()))
@@ -112,16 +103,24 @@ public final class DetectionTopology {
             .filter((key, event) -> event != null)
             .transformValues(() -> new HistoryTransformer(), CUSTOMER_HISTORY)
             .mapValues(this::evaluate);
-    assessments.to(
-        ASSESSMENT_TOPIC,
-        Produced.with(Serdes.String(), new JsonSerde<>(TransactionAssessment.class)));
     assessments
-        .filter((key, value) -> "SUSPICIOUS".equals(value.status()))
-        .mapValues(this::alertFor)
+        .selectKey((customerId, assessment) -> assessment.transactionId())
+        .to(
+            ASSESSMENT_TOPIC,
+            Produced.with(Serdes.String(), new JsonSerde<>(TransactionAssessment.class)));
+    KStream<String, InternalAlert> alerts =
+        assessments
+            .filter((key, value) -> "SUSPICIOUS".equals(value.status()))
+            .mapValues(this::alertFor);
+    alerts
+        .selectKey((customerId, alert) -> alert.alertId())
         .to(ALERT_TOPIC, Produced.with(Serdes.String(), new JsonSerde<>(InternalAlert.class)));
-    assessments
-        .filter((key, value) -> "SUSPICIOUS".equals(value.status()))
-        .mapValues(this::notificationFor)
+    KStream<String, CustomerNotificationRequested> notifications =
+        assessments
+            .filter((key, value) -> "SUSPICIOUS".equals(value.status()))
+            .mapValues(this::notificationFor);
+    notifications
+        .selectKey((customerId, notification) -> notification.notificationRequestId())
         .to(
             NOTIFICATION_TOPIC,
             Produced.with(Serdes.String(), new JsonSerde<>(CustomerNotificationRequested.class)));
@@ -140,6 +139,23 @@ public final class DetectionTopology {
         "TRANSACTION_IDENTITY_CONFLICT",
         "TRANSACTION_IDENTITY_CONFLICT",
         Instant.now());
+  }
+
+  private ValidationResult validate(String key, byte[] payload) {
+    try {
+      TransactionEvent event =
+          TRANSACTION_EVENT_SERDE.deserializer().deserialize(TRANSACTION_TOPIC, payload);
+      return new ValidationResult(
+          event,
+          key != null
+              && event != null
+              && key.equals(event.transactionId())
+              && event.eventId() != null
+              && event.customerId() != null
+              && event.occurredAt() != null);
+    } catch (IllegalArgumentException exception) {
+      return new ValidationResult(null, false);
+    }
   }
 
   private InvalidEventReference invalid(TransactionEvent event) {

@@ -1,9 +1,26 @@
+server:
+  port: ${DETECTION_PORT:8081}
+
 spring:
   application:
     name: detection-engine
   kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9094}
     streams:
       properties:
         processing.guarantee: exactly_once_v2
         consumer.isolation.level: read_committed
         consumer.auto.offset.reset: earliest
+
+detection:
+  kafka:
+    application-id: ${DETECTION_KAFKA_APPLICATION_ID:fraud-detection-engine}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: always

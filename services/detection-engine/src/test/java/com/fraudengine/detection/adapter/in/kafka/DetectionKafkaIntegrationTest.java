@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fraudengine.contracts.RuleSetSnapshot;
 import com.fraudengine.contracts.TransactionAssessment;
 import com.fraudengine.contracts.TransactionEvent;
-import com.fraudengine.detection.config.KafkaStreamsConfiguration;
+import com.fraudengine.detection.DetectionEngineApplication;
 import com.fraudengine.detection.health.StreamsReadinessHealthIndicator;
 import java.time.Duration;
 import java.time.Instant;
@@ -21,9 +21,9 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.Serdes;
-import org.apache.kafka.streams.KafkaStreams;
-import org.apache.kafka.streams.StreamsConfig;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -36,15 +36,17 @@ class DetectionKafkaIntegrationTest {
       new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
 
   @Test
-  void publishesCommittedAssessmentFromKafkaStreamsWithoutPostgres() throws Exception {
-    Properties streamsProperties =
-        new KafkaStreamsConfiguration().properties(KAFKA.getBootstrapServers());
-    streamsProperties.put(StreamsConfig.APPLICATION_ID_CONFIG, "u4-" + UUID.randomUUID());
+  void startsTheApplicationAndPublishesACommittedAssessmentWithoutPostgres() throws Exception {
     createTopics();
-    StreamsReadinessHealthIndicator readiness = new StreamsReadinessHealthIndicator();
-    try (KafkaStreams streams =
-        new KafkaStreams(new DetectionTopology(readiness).build(), streamsProperties)) {
-      streams.start();
+    try (ConfigurableApplicationContext application =
+        new SpringApplicationBuilder(DetectionEngineApplication.class)
+            .run(
+                "--spring.kafka.bootstrap-servers=" + KAFKA.getBootstrapServers(),
+                "--detection.kafka.application-id=u4-" + UUID.randomUUID(),
+                "--server.port=0")) {
+      StreamsReadinessHealthIndicator readiness =
+          application.getBean(StreamsReadinessHealthIndicator.class);
+      publishMalformedTransaction();
       publishRuleset();
       awaitRuleset(readiness);
       publishTransaction();
@@ -64,7 +66,8 @@ class DetectionKafkaIntegrationTest {
                   new NewTopic(DetectionTopology.ASSESSMENT_TOPIC, 1, (short) 1),
                   new NewTopic(DetectionTopology.ALERT_TOPIC, 1, (short) 1),
                   new NewTopic(DetectionTopology.NOTIFICATION_TOPIC, 1, (short) 1),
-                  new NewTopic(DetectionTopology.QUARANTINE_TOPIC, 1, (short) 1)))
+                  new NewTopic(DetectionTopology.QUARANTINE_TOPIC, 1, (short) 1),
+                  new NewTopic(DetectionTopology.INVALID_TOPIC, 1, (short) 1)))
           .all()
           .get();
     }
@@ -128,6 +131,20 @@ class DetectionKafkaIntegrationTest {
                       "BR",
                       "device",
                       "trace")))
+          .get();
+    }
+  }
+
+  private static void publishMalformedTransaction() throws Exception {
+    Properties properties = new Properties();
+    properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
+    try (KafkaProducer<String, byte[]> producer =
+        new KafkaProducer<>(
+            properties, Serdes.String().serializer(), Serdes.ByteArray().serializer())) {
+      producer
+          .send(
+              new ProducerRecord<>(
+                  DetectionTopology.TRANSACTION_TOPIC, "malformed", "not-json".getBytes()))
           .get();
     }
   }

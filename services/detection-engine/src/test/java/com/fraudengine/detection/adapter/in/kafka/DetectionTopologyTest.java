@@ -13,6 +13,7 @@ import com.fraudengine.contracts.TransactionAssessment;
 import com.fraudengine.contracts.TransactionEvent;
 import com.fraudengine.detection.config.KafkaStreamsConfiguration;
 import com.fraudengine.detection.health.StreamsReadinessHealthIndicator;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import java.util.Properties;
@@ -53,7 +54,9 @@ class DetectionTopologyTest {
       rulesets.pipeInput("ACTIVE", snapshot());
       transactions.pipeInput("tx-1", event());
 
-      assertThat(assessments.readValue().status()).isEqualTo("NOT_SUSPICIOUS");
+      var assessment = assessments.readKeyValue();
+      assertThat(assessment.key).isEqualTo("tx-1");
+      assertThat(assessment.value.status()).isEqualTo("NOT_SUSPICIOUS");
       assertThat(
               driver
                   .createOutputTopic(
@@ -71,6 +74,16 @@ class DetectionTopologyTest {
     assertThat(properties.getProperty(StreamsConfig.PROCESSING_GUARANTEE_CONFIG))
         .isEqualTo(StreamsConfig.EXACTLY_ONCE_V2);
     assertThat(properties.getProperty("consumer.isolation.level")).isEqualTo("read_committed");
+  }
+
+  @Test
+  void usesTheTopicsProvisionedByTheLocalKafkaInitializer() {
+    assertThat(DetectionTopology.TRANSACTION_TOPIC).isEqualTo("fraud.transaction.received.v1");
+    assertThat(DetectionTopology.ASSESSMENT_TOPIC).isEqualTo("fraud.assessment.created.v1");
+    assertThat(DetectionTopology.ALERT_TOPIC).isEqualTo("fraud.alert.internal.v1");
+    assertThat(DetectionTopology.NOTIFICATION_TOPIC).isEqualTo("fraud.notification.requested.v1");
+    assertThat(DetectionTopology.QUARANTINE_TOPIC).isEqualTo("fraud.transaction.quarantine.v1");
+    assertThat(DetectionTopology.INVALID_TOPIC).isEqualTo("fraud.transaction.invalid.v1");
   }
 
   @Test
@@ -141,8 +154,11 @@ class DetectionTopologyTest {
               "BR",
               "device",
               "trace"));
-      InternalAlert alert = alerts.readValue();
-      assertThat(notifications.readValue().alertId()).isEqualTo(alert.alertId());
+      var alert = alerts.readKeyValue();
+      var notification = notifications.readKeyValue();
+      assertThat(alert.key).isEqualTo(alert.value.alertId());
+      assertThat(notification.key).isEqualTo(notification.value.notificationRequestId());
+      assertThat(notification.value.alertId()).isEqualTo(alert.value.alertId());
     }
   }
 
@@ -643,6 +659,46 @@ class DetectionTopologyTest {
       rulesets.pipeInput("ACTIVE", snapshot());
       transactions.pipeInput("wrong-key", event());
       transactions.pipeInput("tx-1", event());
+      assertThat(invalid.readValue().reasonCode()).isEqualTo("INVALID_TRANSACTION_EVENT");
+      assertThat(assessments.readValue().transactionId()).isEqualTo("tx-1");
+    }
+  }
+
+  @Test
+  void routesMalformedJsonWithoutStoppingTheNextValidEvent() {
+    Properties properties = new Properties();
+    properties.put(StreamsConfig.APPLICATION_ID_CONFIG, "malformed-json-test");
+    properties.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:9092");
+    try (TopologyTestDriver driver =
+        new TopologyTestDriver(new DetectionTopology().build(), properties)) {
+      var rulesets =
+          driver.createInputTopic(
+              DetectionTopology.RULESET_TOPIC,
+              Serdes.String().serializer(),
+              new JsonSerde<>(RuleSetSnapshot.class).serializer());
+      var transactions =
+          driver.createInputTopic(
+              DetectionTopology.TRANSACTION_TOPIC,
+              Serdes.String().serializer(),
+              Serdes.ByteArray().serializer());
+      var invalid =
+          driver.createOutputTopic(
+              DetectionTopology.INVALID_TOPIC,
+              Serdes.String().deserializer(),
+              new JsonSerde<>(InvalidEventReference.class).deserializer());
+      var assessments =
+          driver.createOutputTopic(
+              DetectionTopology.ASSESSMENT_TOPIC,
+              Serdes.String().deserializer(),
+              new JsonSerde<>(TransactionAssessment.class).deserializer());
+      rulesets.pipeInput("ACTIVE", snapshot());
+      transactions.pipeInput("malformed", "not-json".getBytes(StandardCharsets.UTF_8));
+      transactions.pipeInput(
+          "tx-1",
+          new JsonSerde<>(TransactionEvent.class)
+              .serializer()
+              .serialize(DetectionTopology.TRANSACTION_TOPIC, event()));
+
       assertThat(invalid.readValue().reasonCode()).isEqualTo("INVALID_TRANSACTION_EVENT");
       assertThat(assessments.readValue().transactionId()).isEqualTo("tx-1");
     }
