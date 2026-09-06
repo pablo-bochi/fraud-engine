@@ -1,0 +1,1 @@
+{"schemaVersion":1,"sourceTopic":"fraud.transaction.received.v1","sourcePartition":0,"sourceOffset":43,"eventId":"evt-02","transactionId":"txn-01","payloadHash":"sha256:received","conflictingIdentityHash":"sha256:original","reasonCode":"TRANSACTION_ID_CONFLICT","detectedAt":"2026-09-05T12:31:00Z"}

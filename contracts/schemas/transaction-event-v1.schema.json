@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://fraud-engine.local/schemas/transaction-event-v1.schema.json",
+  "title": "TransactionEvent v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "eventId",
+    "transactionId",
+    "customerId",
+    "amountMinor",
+    "currency",
+    "occurredAt",
+    "transactionType",
+    "channel",
+    "merchantCountry",
+    "deviceIdHash",
+    "traceId"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "transactionId": { "type": "string" },
+    "customerId": { "type": "string" },
+    "amountMinor": { "type": "integer", "minimum": 0 },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "occurredAt": { "type": "string" },
+    "transactionType": { "type": "string" },
+    "channel": { "type": "string" },
+    "merchantCountry": { "type": "string" },
+    "merchantCategory": { "type": "string", "pattern": "^[0-9]{4}$" },
+    "deviceIdHash": { "type": "string" },
+    "traceId": { "type": "string" }
+  }
+}

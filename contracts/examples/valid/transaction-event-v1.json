@@ -1,0 +1,1 @@
+{"schemaVersion":1,"eventId":"evt-01","transactionId":"txn-01","customerId":"cus-01","amountMinor":12500,"currency":"BRL","occurredAt":"2026-09-05T12:30:00Z","transactionType":"PURCHASE","channel":"ECOMMERCE","merchantCountry":"BR","deviceIdHash":"sha256:7e31f0f8cfd4b26f","traceId":"4bf92f3577b34da6a3ce929d0e0e4736"}

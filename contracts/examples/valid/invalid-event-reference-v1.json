@@ -1,0 +1,1 @@
+{"schemaVersion":1,"sourceTopic":"fraud.transaction.received.v1","sourcePartition":0,"sourceOffset":42,"payloadHash":"sha256:def","sourceSchemaVersion":2,"reasonCode":"UNSUPPORTED_SCHEMA","detectedAt":"2026-09-05T12:30:00Z"}

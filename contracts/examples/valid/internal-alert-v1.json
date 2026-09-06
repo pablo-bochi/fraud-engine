@@ -1,0 +1,1 @@
+{"schemaVersion":1,"alertId":"alt-01","assessmentId":"asm-01","eventId":"evt-01","transactionId":"txn-01","customerId":"cus-01","severity":"HIGH","matchedRules":[{"ruleId":"rule-01","ruleVersion":1,"evidenceCodes":["AMOUNT_THRESHOLD_EXCEEDED"]}],"rulesetVersion":1,"createdAt":"2026-09-05T12:30:00Z","traceId":"trace-01"}
