@@ -15,10 +15,10 @@ deepened: 2026-09-05
 ## Resumo do objetivo
 
 - **Objetivo:** Permitir que sistemas antifraude identifiquem transações suspeitas em tempo real, recebam evidências explicáveis e notifiquem o cliente sem colocar o motor no caminho de autorização da transação.
-- **Meios:** Construir uma fatia vertical em Java 21 com Spring Boot e Kafka Streams, apoiada por PostgreSQL, contratos JSON versionados e ferramentas Python de teste (KTD1, KTD2, KTD3, KTD4).
+- **Meios:** Construir uma fatia vertical em Java 21 com Spring Boot e Kafka Streams, apoiada por PostgreSQL e contratos JSON versionados; Python aparece somente no ensaio opcional de carga (KTD1, KTD2, KTD3, KTD4).
 - **Autoridade do produto:** Requisitos do case técnico e decisões de escopo confirmadas durante o refinamento.
-- **Perfil de execução:** Plano aprofundado de implementação em código; os experimentos de carga e falha executam fora da etapa comum de CI.
-- **Condições de conclusão:** Todos os requisitos aplicáveis ao MVP, cenários de aceite, etapas de verificação e documentação devem estar atendidos; nenhum resultado de benchmark pode ser apresentado como certificação produtiva.
+- **Perfil de execução:** Plano reduzido para uma fatia vertical executável. U1-U5 e U9 são obrigatórias; U6 e U8 são opcionais e só começam depois que o caminho principal estiver verificado. U7 foi absorvida por U5.
+- **Condições de conclusão:** Todos os requisitos atribuídos às unidades obrigatórias, seus cenários de aceite, verificações e documentação devem estar atendidos. U6 e U8 não bloqueiam a entrega. Nenhum resultado de benchmark pode ser apresentado como certificação produtiva.
 - **Responsabilidade pelo acabamento:** A execução inclui remoção de tentativas abandonadas, atualização dos diagramas e registro dos resultados reais de testes e benchmarks.
 
 ### Compromisso de autoria e aprendizagem
@@ -37,10 +37,12 @@ deepened: 2026-09-05
 ## Contrato do produto
 
 > **Nota de preservação:** O contrato do produto foi alterado em A2, R8, R9, R12, F4 e AE13-AE15 por decisões explícitas do autor do case: a criação já produz uma versão imutável pendente; sua aprovação valida integralmente a mudança, cria atomicamente um snapshot desejado não vazio e sua outbox; e as identidades administrativas vêm exclusivamente do `sub` do JWT validado. Foram removidas a submissão e a ativação manual separadas, sem enfraquecer a proibição de autoaprovação.
+>
+> **Nota de redução de escopo:** Em 2026-09-06, o autor aprovou concentrar a evidência executável no núcleo da detecção. R18, R20-R25, R27, R33, R35 e R36 foram delimitados entre garantia mínima local, arquitetura produtiva documentada e trabalho opcional. U7 foi absorvida por U5; U6 e U8 passaram a ser opcionais. As propriedades retiradas do código obrigatório permanecem registradas como limitações e evoluções, não como capacidades implementadas.
 
 ### Resumo
 
-O plano implementa todo o escopo do brainstorm em um monorepo com três aplicações Java, Kafka Streams no plano de dados e ferramentas Python para testes de sistema e carga. O ambiente local torna avaliações, alertas, métricas e notificações inspecionáveis, enquanto as integrações AWS e os controles bancários completos permanecem documentados como arquitetura produtiva.
+O plano implementa o núcleo do brainstorm em um monorepo com três aplicações Java e Kafka Streams no plano de dados. O caminho obrigatório demonstra regras governadas e dinâmicas, avaliação sem estado e com estado, saídas explicáveis, idempotência nas bordas e uma notificação local. Segurança corporativa completa, tratamento operacional avançado, painéis e ensaios de capacidade permanecem documentados ou opcionais conforme a seção de escopo.
 
 ### Contexto do problema
 
@@ -110,21 +112,21 @@ stateDiagram-v2
 
 **Consistência, tempo e estado**
 
-- R14. Dentro do horizonte online configurado de identidade, o motor deve deduplicar reentregas por `eventId` sem repetir saídas; além dele, IDs determinísticos e consumidores idempotentes impedem a repetição do efeito de negócio, e replay deliberado usa namespace isolado.
+- R14. Dentro do horizonte online configurado, o motor deve deduplicar o mesmo `eventId` na rota esperada de `transactionId` e `customerId` sem repetir saídas; além dele, IDs determinísticos e consumidores idempotentes protegem o efeito de negócio. Reutilização de `eventId` entre clientes e replay deliberado pertencem às limitações e ao desenho futuro.
 - R15. O mesmo `transactionId` com outro `eventId` deve ser tratado como conflito de dados.
 - R16. Avaliações, alertas e notificações devem usar identificadores determinísticos e consumidores idempotentes.
 - R17. O MVP deve manter habilitada a atomicidade do processador para coordenar offsets, estado e saídas Kafka; se o benchmark local não atingir R27, o desvio será registrado como limitação medida e não justificará remover silenciosamente a garantia.
-- R18. Integrações externas devem reconciliar resultados ambíguos antes de repetir um efeito.
+- R18. O MVP deve impedir uma segunda entrega para a mesma `notificationRequestId` já concluída. Em produção, integrações externas devem usar chave de idempotência ou consulta de status para reconciliar resultados ambíguos antes de repetir um efeito.
 - R19. O fluxo principal deve ser particionado por `customerId` e manter estado de janela com TTL no processador, sem consulta remota obrigatória por transação.
-- R20. Regras temporais devem usar `occurredAt`, aceitar uma pequena desordem configurável e processar automaticamente eventos atrasados.
-- R21. Um evento antigo demais para o histórico disponível deve tornar `NOT_EVALUATED` as regras com estado afetadas.
+- R20. Regras temporais devem usar `occurredAt`; o MVP avalia eventos dentro do histórico retido sem aguardar reordenação, enquanto uma política completa de marca d'água e tolerância configurável fica como evolução.
+- R21. Um evento sem histórico suficiente deve tornar `NOT_EVALUATED` as regras com estado afetadas, sem exigir no MVP uma classificação operacional completa de todos os atrasos.
 - R22. Eventos atrasados não devem reabrir avaliações anteriores automaticamente no MVP.
 
 **Resiliência e capacidade**
 
-- R23. Uma falha temporária de dependência deve preservar as avaliações possíveis, usar cache válido quando disponível e resultar em `INCONCLUSIVE` quando não for seguro concluir `NOT_SUSPICIOUS`.
-- R24. Falhas transitórias devem usar novas tentativas limitadas, espera progressiva (`backoff`), disjuntor (`circuit breaker`) e DLQ.
-- R25. Conflitos estruturais devem seguir quarentena restrita com investigação e reexecução controlada.
+- R23. A indisponibilidade do plano de controle não deve interromper o motor que já possui um ruleset válido; falhas de notificação não podem remover ou atrasar o alerta interno já publicado.
+- R24. O MVP deve registrar falhas de notificação e permitir nova tentativa segura pelo mesmo identificador. Backoff exponencial, circuit breaker e DLQ automatizada pertencem à arquitetura produtiva documentada.
+- R25. Payloads inválidos e conflitos de identidade devem produzir referências sanitizadas em tópicos próprios e não alterar o estado de detecção. Investigação, retenção protegida e reexecução autorizada da quarentena pertencem ao procedimento produtivo documentado.
 - R26. A arquitetura deve escalar horizontalmente para média de 8.000 TPS e picos de 25.000 TPS, expondo distribuição por partição, atraso dos consumidores, crescimento de estado e chaves sobrecarregadas.
 - R27. O SLO produtivo deve ser de 99,9% das avaliações e alertas internos publicados de forma durável em até 500 ms após o recebimento; a entrega externa fica fora dessa janela.
 
@@ -138,12 +140,12 @@ stateDiagram-v2
 
 - R31. Entrada e saídas devem usar contratos canônicos versionados e adaptadores substituíveis para evitar acoplamento da lógica de regras aos sistemas integrados.
 - R32. Evolução de schema, testes de contrato e identidade de correlação devem proteger a compatibilidade e a rastreabilidade das integrações.
-- R33. SRE deve observar métricas, logs estruturados e rastros correlacionados para disponibilidade, vazão, latência, atraso de consumo, erros, regras acionadas, `INCONCLUSIVE`, duplicidades, falhas de dependência, idade/versão do snapshot e recuperação do acúmulo.
+- R33. O MVP obrigatório deve expor prontidão do motor, status do rollout, saídas consultáveis e logs correlacionados sem dados pessoais. Métricas agregadas, painéis, alertas e visualização concreta de vazão, latência e atraso de consumo compõem U6 opcional.
 - R34. O sistema deve distinguir anomalias imediatas de volume de falsos positivos confirmados e prever feedback `FRAUD`, `LEGITIMATE` ou `UNKNOWN` vindo de investigação, cliente ou sistemas posteriores.
-- R35. A estratégia de qualidade deve cobrir testes unitários, contratos, integração, componente, ponta a ponta, fumaça, segurança, resiliência, desempenho e backtest.
-- R36. Testes de carga e falha devem executar separadamente da etapa comum de CI e registrar ambiente, configuração e resultados.
+- R35. A evidência obrigatória deve cobrir testes unitários, contratos, integração e fumaça ponta a ponta. Segurança, resiliência, desempenho e backtest devem ter estratégia documentada; automação adicional segue a prioridade explícita das unidades.
+- R36. Se executados, testes de carga e falha devem rodar fora da etapa comum de CI e registrar ambiente, configuração e resultados sem extrapolar a capacidade observada para produção.
 - R37. O repositório deve fornecer execução reproduzível, decisões e trade-offs, diagramas, limitações e uso transparente de IA, mantendo explicações necessárias para que o responsável pelo case domine o comportamento entregue.
-- R38. Backtest e reprocessamento devem permanecer capacidades arquiteturais explícitas e acionadas sobre intervalos delimitados, sem enviar notificações externas automaticamente; sua automação completa fica fora do MVP.
+- R38. O documento de arquitetura deve prever backtest e reprocessamento futuros sobre intervalos delimitados, com `runId` próprio e notificações externas bloqueadas; nenhuma capacidade executável de replay pertence ao MVP.
 
 ### Fluxo do sistema
 
@@ -181,27 +183,27 @@ flowchart TB
 - F3. **Reentrega e conflito**
   - **Gatilho:** Um evento já visto ou uma nova identidade de evento para a mesma transação chega ao motor.
   - **Atores:** A1, A3, A8.
-  - **Etapas:** A reentrega retorna os mesmos efeitos; a identidade conflitante é isolada e observada para investigação.
+  - **Etapas:** A reentrega é identificada antes de alterar o histórico; a identidade conflitante gera uma referência sanitizada e é isolada do fluxo de avaliação.
   - **Resultado:** Nenhum alerta ou envio externo é duplicado.
   - **Abrange:** R14, R15, R16, R24, R25, R33.
 - F4. **Mudança de regra**
   - **Gatilho:** A2 propõe uma nova regra ou versão.
   - **Atores:** A2, A3, A9.
   - **Etapas:** A criação persiste uma versão imutável pendente e associa ao `sub` autenticado sua autoria e auditoria. Uma segunda pessoa solicita a aprovação; antes de alterar qualquer estado, o serviço valida a AST, os limites, o contrato, a serialização canônica e que o snapshot candidato contém ao menos uma regra. A mesma transação registra o aprovador autenticado e a auditoria, monta o novo snapshot completo desejado e cria a outbox. O publicador propaga automaticamente todos os snapshots em ordem, e cada instância do motor valida e troca atomicamente o conjunto usado pelas novas avaliações.
-  - **Resultado:** A mudança ocorre sem nova implantação, preserva histórico e pode ser retirada com rapidez.
+  - **Resultado:** A mudança ocorre sem nova implantação e preserva o histórico; retirada emergencial com prioridade própria fica como evolução produtiva.
   - **Abrange:** R7, R8, R9, R10, R11.
 - F5. **Falha de dependência**
   - **Gatilho:** Gerenciamento de regras, notificador ou outra dependência fica indisponível.
   - **Atores:** A3, A5, A8.
-  - **Etapas:** O motor usa estado válido local, mantém avaliações possíveis e publica `INCONCLUSIVE` quando necessário; entregas externas seguem novas tentativas e reconciliação independentes.
-  - **Resultado:** A ingestão continua sem fabricar resultado seguro ou duplicar efeitos.
+  - **Etapas:** O motor usa o último ruleset válido local; o notificador registra o resultado e reconhece uma repetição pela mesma identidade.
+  - **Resultado:** O alerta interno permanece independente da entrega externa e o mesmo pedido concluído não gera outro e-mail.
   - **Abrange:** R11, R12, R16, R18, R23, R24.
 - F6. **Evento atrasado**
   - **Gatilho:** Um evento chega fora de ordem.
   - **Atores:** A1, A3, A8.
-  - **Etapas:** O motor o processa automaticamente pelo horário de ocorrência, atualiza o estado futuro e registra a condição; histórico insuficiente impede somente as regras com estado afetadas.
+  - **Etapas:** O motor consulta o histórico retido pelo horário de ocorrência; histórico insuficiente impede somente as regras com estado afetadas.
   - **Resultado:** O evento não é descartado silenciosamente e avaliações passadas não são reabertas no MVP.
-  - **Abrange:** R20, R21, R22, R23, R33, R38.
+  - **Abrange:** R20, R21, R22, R23, R33.
 - F7. **Incidente de qualidade**
   - **Gatilho:** Métricas mostram crescimento atípico de alertas ou feedback posterior confirma baixa qualidade.
   - **Atores:** A2, A4, A8.
@@ -214,14 +216,14 @@ flowchart TB
 - AE1. **Transação normal.** **Abrange R3.** Dado um evento válido que não aciona regras, quando ele é avaliado, então uma avaliação `NOT_SUSPICIOUS` é publicada e nenhum alerta é criado.
 - AE2. **Múltiplas correspondências.** **Abrange R4, R13.** Dado que regras `HIGH` e `CRITICAL` acionam na mesma transação, quando a avaliação termina, então existe um alerta consolidado com ambas e severidade final `CRITICAL`.
 - AE3. **Reentrega idêntica.** **Abrange R14, R16.** Dado o mesmo `eventId` recebido mais de uma vez dentro do horizonte online de identidade, quando as entregas são processadas, então ocorre somente o conjunto de saídas da primeira avaliação; alerta e notificação existem apenas quando essa avaliação é suspeita.
-- AE4. **Identidade conflitante.** **Abrange R15, R25.** Dado o mesmo `transactionId` com outro `eventId`, quando o segundo evento chega, então ele é tratado como conflito e não produz uma segunda decisão silenciosa.
+- AE4. **Identidade conflitante.** **Abrange R15, R25.** Dado o mesmo `transactionId` com outro `eventId`, quando o segundo evento chega, então uma referência sanitizada de conflito é publicada, nenhuma avaliação é criada e o histórico não muda.
 - AE5. **Autoaprovação.** **Abrange R9.** Dado que uma pessoa criou uma versão, quando tenta aprová-la, então a operação é negada e auditada.
 - AE6. **Gerenciamento indisponível.** **Abrange R11, R12, R23.** Dado um conjunto válido já carregado, quando o serviço de regras fica indisponível, então o motor continua com a última versão; uma instância vazia permanece não pronta.
-- AE7. **Notificador indisponível.** **Abrange R6, R16, R18, R23.** Dado um alerta suspeito, quando o canal externo falha temporariamente, então o alerta interno permanece publicado e a entrega é retomada sem duplicação.
+- AE7. **Entrega idempotente.** **Abrange R6, R16, R18, R23, R24.** Dada uma solicitação já enviada, quando ela é consumida novamente, então o registro existente é reutilizado e nenhum segundo e-mail é enviado. Uma falha de canal termina em estado observável sem afetar o alerta interno.
 - AE8. **Evento atrasado recuperável.** **Abrange R20.** Dado um evento fora de ordem ainda coberto pelo estado, quando chega, então é avaliado automaticamente, marcado como atrasado e passa a contribuir para avaliações futuras.
 - AE9. **Histórico insuficiente.** **Abrange R3, R21, R23.** Dado um evento antigo demais para uma regra com estado e nenhuma correspondência conclusiva, quando é avaliado, então o resultado é `INCONCLUSIVE`, não `NOT_SUSPICIOUS`.
 - AE10. **Minimização de dados.** **Abrange R2, R5, R28.** Dado o fluxo completo, quando payloads e logs são inspecionados, então somente o notificador autorizado acessa o contato fictício e o motor não contém esse dado.
-- AE11. **Carga reproduzível.** **Abrange R26, R27, R33, R35, R36.** Dado um perfil documentado de carga, quando o teste executa, então registra vazão, percentis de latência, atraso de consumo, recursos e efeitos duplicados com identificação do ambiente.
+- AE11. **Carga reproduzível opcional.** **Abrange R26, R27, R33, R35, R36.** Se U8 for executada, dado um perfil documentado de carga, quando o teste executa, então registra vazão, percentis de latência, atraso de consumo, recursos e integridade das saídas com identificação do ambiente.
 - AE12. **Integração substituível.** **Abrange R31, R32.** Dado um consumidor interno compatível com o contrato versionado, quando ele é conectado por outro adaptador, então a lógica das regras não precisa mudar.
 - AE13. **Aprovação e rollout assíncrono.** **Abrange R8-R12.** Dada uma versão pendente criada por outra pessoa, quando o aprovador a aprova, então a API retorna `202 Accepted` com o snapshot desejado e a publicação pendente. Cada instância continua usando seu último snapshot válido até receber, validar e trocar para a nova versão; uma republicação idêntica não causa segunda troca lógica.
 - AE14. **Conjunto de regras não vazio.** **Abrange R8, R12, R13.** Dado que uma retirada eliminaria a última regra ativa, quando sua aprovação é solicitada, então a operação registra a auditoria da negação, mas não altera versão, head ou snapshot nem cria outbox; o último conjunto válido permanece em uso.
@@ -231,9 +233,10 @@ flowchart TB
 
 - O ambiente local executa o fluxo da transação até a avaliação, o alerta interno e o e-mail fictício com instruções reproduzíveis.
 - O teste funcional não perde eventos únicos aceitos nem produz efeitos de negócio duplicados nos cenários de reentrega cobertos.
-- O benchmark publica p50, p95, p99, p99.9, máximo, vazão, atraso de consumo e uso de recursos para carga sustentada e de pico.
 - A arquitetura demonstra como escalar para 8.000 TPS médios e 25.000 TPS de pico e identifica limites do hardware local.
-- Falhas simuladas mostram recuperação do estado e redução posterior do backlog sem corromper as saídas.
+- A documentação distingue capacidades executadas, capacidades apenas projetadas para produção e trabalhos opcionais não concluídos.
+- Se U6 for executada, um painel mostra saúde, vazão, latência, atraso de consumo e versão do ruleset.
+- Se U8 for executada, o relatório publica p50, p95, p99, p99.9, máximo, vazão, atraso de consumo e uso de recursos para carga sustentada e de pico.
 - Segurança, privacidade, integração, operação e retenção têm controles produtivos rastreáveis e simplificações locais declaradas.
 - A documentação permite relacionar requisitos, decisões, fluxos, testes, limitações e evoluções sem depender de conhecimento implícito.
 
@@ -241,16 +244,25 @@ flowchart TB
 
 **Incluído no MVP**
 
-- Motor determinístico com estado, broker, gerenciamento simplificado de regras, contratos de saída, persistência operacional e observabilidade essencial.
-- Entrega externa local simulada, carga e análise por ferramentas Python, testes automatizados e experimentos separados de resiliência e desempenho.
+- Motor determinístico com uma regra sem estado e uma regra de janela por cliente, broker, gerenciamento governado de regras, contratos de saída e observabilidade essencial por saúde, métricas e logs.
+- Entrega externa local simulada com idempotência por `notificationRequestId`, testes automatizados de domínio, contrato e integração, além de uma verificação de fumaça do caminho principal.
 - Documentação da arquitetura produtiva, ameaças e controles, trade-offs, capacidade, operação e uso de IA.
+
+**Se der tempo**
+
+- U6 provisiona Prometheus e Grafana e cria um painel concreto para saúde, vazão, latência, atraso de consumo, versões do ruleset e resultado de notificações.
+- U8 executa uma carga reproduzível para testar as metas de 8.000 TPS médios, pico de 25.000 TPS e 99,9% das avaliações/alertas internos em até 500 ms. O relatório deve declarar o resultado medido, inclusive quando a máquina local não atingir a meta.
 
 **Adiado para depois**
 
 - Aprendizado de máquina online, repositório compartilhado de características, serviço Python de decisão, modo sombra completo e pontuação ponderada ou híbrida.
 - Motor síncrono no fluxo de autorização, respostas `approve/challenge/block` e políticas fail-open ou fail-closed.
 - Reprocessamento e backtest automatizados, correção retroativa de avaliações e feedback real de sistemas de investigação ou contestação.
+- Retirada emergencial que ultrapassa snapshots pendentes, coalescimento autorizado ou corte global coordenado do ruleset.
 - Distribuição adaptativa de chaves sobrecarregadas (`salting`), agregação em dois estágios e múltiplos fluxos reparticionados por entidade.
+- Deduplicação global de `eventId` entre clientes, bootstrap com consumidor independente até o end offset, convergência automatizada entre duas instâncias, política completa de eventos atrasados e automação operacional de quarentena.
+- Concessão de trabalho no notificador, supressão por janela, circuit breaker, reconciliação de resultado SMTP ambíguo e DLQ automática.
+- Testes destrutivos de caos, matriz completa de recuperação e pipeline executável de backtest.
 - Infraestrutura multi-região, arquivamento automatizado, integração com provedor externo real e segurança corporativa completa no ambiente local.
 - UI para regras, investigação, operação ou visualização de alertas.
 
@@ -296,20 +308,20 @@ flowchart TB
 - KTD4. **JSON Schema Draft-07 e records manuais.** (decisão consolidada na sessão: aprovada pelo usuário — escolhida em vez de Avro com registro local e classes Java geradas porque contratos legíveis e records manuais mantêm o MVP transparente e compatível com o AWS Glue Schema Registry.) Jackson fará a serialização e desserialização JSON, e um validador compatível com Jackson 2 validará schemas compilados uma vez na inicialização. Testes de contrato impedirão divergência entre schemas, exemplos e records. Rege R1, R2, R5, R28, R31, R32.
 - KTD5. **Contratos monetários e temporais sem ambiguidade.** Valores usarão inteiros na menor unidade monetária, moedas usarão ISO-4217 e horários usarão UTC `Instant`. IDs serão opacos e limitados em tamanho. Não haverá conversão cambial no MVP, e uma agregação não misturará moedas. Rege R2, R7, R20, R28, R32.
 - KTD6. **Atomicidade Kafka habilitada desde o início.** `exactly_once_v2` envolverá o offset de entrada, os repositórios de estado e todas as saídas Kafka da avaliação. Consumidores lerão somente dados confirmados. O broker único local configurará o fator de replicação e o ISR mínimo do log de estado transacional como 1; produção manterá replicação resiliente. Mesmo que o benchmark local exceda 500 ms, a garantia permanecerá habilitada e o resultado será relatado como limitação medida; qualquer revisão futura dessa decisão exigiria novo contrato de consistência, não um ajuste oculto de desempenho. Rege R4, R14, R16, R17, R27.
-- KTD7. **Integridade global antes do particionamento por cliente.** O tópico de entrada usará `transactionId` como chave. O primeiro estágio detectará conflitos da transação; em seguida, um reparticionamento explícito por `eventId` alimentará um repositório globalmente particionado de impressões digitais; por fim, eventos novos serão reparticionados por `customerId`. O mesmo evento com a mesma impressão digital será duplicata; qualquer colisão de identidade ou conteúdo será conflito. As duas redistribuições adicionais compram a garantia executável de R14/R15 e terão seu custo de latência medido. Rege R14, R15, R16, R19, R25, R27.
-- KTD8. **IDs separados para o fluxo online e o backtest.** No fluxo online, `assessmentId` será determinístico a partir de `eventId`; `alertId` derivará de `assessmentId`; e `notificationRequestId` derivará somente de `alertId`. (session-settled: user-approved — chosen over deriving the request identity from `alertId` plus channel: the detection engine does not resolve the delivery channel.) O notificador escolhe o canal posteriormente e o registra na entrega e em cada tentativa. Um backtest usará `runId`, `eventId` e `rulesetVersion` em espaço de nomes próprio para não colidir com a avaliação online. Rege R4, R14, R16, R18, R38.
-- KTD9. **DSL segura em vez de Drools no MVP.** (decisão consolidada na sessão: aprovada pelo usuário — escolhida em vez de carregar DRL ou expressões arbitrárias porque uma AST tipada com lista de permissões é mais fácil de limitar, explicar e integrar ao estado do Kafka.) A DSL suportará comparação de atributo, limite monetário, contagem e soma por janela, além de `AND` e `OR`. Não aceitará scripts, SpEL, reflexão ou ações executáveis. Limites cobrirão payload, número de regras, profundidade, condições e tamanho de janela. Rege R7, R13, R29.
-- KTD10. **Snapshot completo, não vazio, inicialização bloqueante e rollout observável.** (session-settled: user-approved — chosen over allowing an empty active set: the engine must never interpret absence of policy as a safe transaction.) A aprovação construirá um `RuleSetSnapshot` completo e imutável com pelo menos uma regra ativa, versão monotônica, hash e versões exatas das regras. O JSON Schema usará `minItems: 1`, o serviço de controle recusará a retirada da última regra antes do commit e o motor tratará snapshot vazio como inválido. Identidades administrativas permanecerão no PostgreSQL e na auditoria, sem serem propagadas ao motor. O tópico compactado com chave `ACTIVE` alimentará um repositório global registrado por `Topology.addGlobalStore`; cada instância manterá uma cópia completa, e somente o `RuleSetUpdateProcessor` da thread global poderá gravá-la após desserialização defensiva, validação e compilação. Antes de chamar `KafkaStreams.start()`, um `RuleSetBootstrapLoader` independente, sem commits e com atribuição manual, lerá a partição até seu end offset e exigirá pelo menos um snapshot `ACTIVE` válido e não vazio; sem ele, a topologia de transações não inicia e seus offsets permanecem intocados. O `start()` então restaura o repositório global antes de retornar, repetindo a validação e alcançando qualquer atualização publicada durante a transição. Em cada atualização, a instância valida contrato, hash, versão e limites da DSL antes de substituir o valor completo. Cada avaliação captura uma única referência imutável no início e registra sua `rulesetVersion`. Assim, a troca é atômica por instância e avaliação, mas não é um corte simultâneo global: durante a convergência, instâncias diferentes podem avaliar transações adjacentes com versões consecutivas. O plano distinguirá `desiredVersion` no PostgreSQL, `publishedVersion` confirmada pelo Kafka e `loadedVersion` por instância. Evolução incompatível exige implantar consumidores antes do produtor de regras; o serviço de controle compartilha o validador e recusa schema não suportado. Uma atualização inválida mantém o último snapshot válido; uma instância vazia permanece não pronta até receber uma versão corretiva maior. Rege R8, R10, R11, R12, R13, R28, R32, R33.
-- KTD11. **Validação prévia, aprovação transacional e outbox ordenada.** (session-settled: user-directed — chosen over separate submit and activate commands: approval is the single human action that promotes an immutable change.) PostgreSQL foi escolhido em vez de MongoDB ou DynamoDB porque transações relacionais, restrições e JSONB atendem ao fluxo, à auditoria e à outbox sem adicionar outro modelo de persistência. Depois de autenticar, autorizar e negar autoaprovação, o serviço bloqueia `RULESET_HEAD`, monta o snapshot candidato e valida integralmente AST, limites, schema, conjunto não vazio, serialização canônica, hash e tamanho compatível com a configuração do Kafka. Qualquer falha determinística é auditada e aborta a operação antes de mudar o status da `RuleVersion` ou criar snapshot/outbox. Somente então o serviço marca a versão como `APPROVED`, atualiza o estado desejado, grava a auditoria de sucesso e insere o `OutboxEvent` `PENDING` na mesma transação. A API retorna `202 Accepted` sem aguardar Kafka. Um relay automático executado em segundo plano dentro do `fraud-control-service` procura pendências enquanto a aplicação está ativa e considera sempre a menor versão `PENDING`, mesmo quando ela está em backoff. (session-settled: user-approved — chosen over coalescing unpublished snapshots: every approved snapshot is published in monotonic order so the audit trail and the observed rollout remain complete.) Somente se a primeira versão estiver elegível por `next_attempt_at` ele a publica; caso contrário, nenhuma versão posterior avança. Ele pode manter uma transação curta aberta durante o ack Kafka com timeout estrito porque mudanças de regra são raras. Falhas transitórias usam backoff exponencial limitado por um teto, continuam sendo tentadas sem pular a versão e geram alerta crítico quando excedem o limiar operacional. Após o ack, o relay marca outbox e `publishedVersion` na mesma transação. Uma falha entre publicação e commit causa republicação segura da mesma identidade, versão e hash. Rege R8, R9, R10, R11, R29, R31.
-- KTD12. **Estado do caminho crítico em RocksDB com log de alterações Kafka.** Repositórios separados manterão integridade e deduplicação, histórico temporal por cliente e último conjunto de regras válido. O horizonte online inicial será 24 horas para identidade, suficiente para reentregas e recuperação operacional do MVP; a maior janela será 10 minutos e a retenção do histórico, 15 minutos. A retenção de sete dias da entrada serve a investigação restrita, não autoriza replay no fluxo online depois que a identidade expira. Backtest ou reprocessamento posterior usa `runId` próprio e mantém notificações externas bloqueadas. Esses valores são demonstrativos e configuráveis. Rege R14, R15, R19, R20, R21, R26, R38.
-- KTD13. **Tempo do evento sem espera artificial.** `occurredAt` será o timestamp do registro. A tolerância inicial de atraso será de 2 minutos, a tolerância de futuro será de 1 minuto e eventos não serão retidos aguardando reordenação. Os 2 minutos governam a marcação operacional de atraso e a folga das janelas, não o descarte: um evento mais atrasado que isso, mas ainda coberto pelos 15 minutos de histórico, continua sendo avaliado e marcado. Somente a ausência do histórico exigido produz `NOT_EVALUATED`. Eventos atrasados consultarão fatos com horário menor ou igual ao seu e depois contribuirão para avaliações futuras. Essa interpretação protege o SLO e preserva R20-R22. Rege R20, R21, R22, R27.
+- KTD7. **Integridade da transação antes do particionamento por cliente.** O tópico de entrada usará `transactionId` como chave. Um repositório local detectará outro `eventId` para a mesma transação antes de um único reparticionamento por `customerId`. Depois dele, um repositório de impressões digitais por cliente deduplicará o mesmo `eventId`. Esse corte preserva os casos esperados do contrato com uma redistribuição, mas não promete detectar globalmente um `eventId` reutilizado sob clientes diferentes; essa violação de produtor fica documentada como limitação do MVP. Rege R14, R15, R16, R19, R25, R27.
+- KTD8. **IDs separados para o fluxo online e o backtest.** No fluxo online, `assessmentId` será determinístico a partir de `eventId`; `alertId` derivará de `assessmentId`; e `notificationRequestId` derivará somente de `alertId`. (session-settled: user-approved — chosen over deriving the request identity from `alertId` plus channel: the detection engine does not resolve the delivery channel.) O notificador escolhe o canal posteriormente e o registra na entrega. Um backtest futuro usará `runId`, `eventId` e `rulesetVersion` em espaço de nomes próprio para não colidir com a avaliação online. Rege R4, R14, R16, R18, R38.
+- KTD9. **DSL segura em vez de Drools no MVP.** (decisão consolidada na sessão: aprovada pelo usuário — escolhida em vez de carregar DRL ou expressões arbitrárias porque uma AST tipada com lista de permissões é mais fácil de limitar, explicar e integrar ao estado do Kafka.) A implementação obrigatória suportará limite monetário, contagem por janela e composição `AND`/`OR`; soma por janela e comparações adicionais permanecem extensões da mesma AST. Não aceitará scripts, SpEL, reflexão ou ações executáveis. Limites cobrirão payload, número de regras, profundidade, condições e tamanho de janela. Rege R7, R13, R29.
+- KTD10. **Snapshot completo, não vazio e rollout observável.** (session-settled: user-approved — chosen over allowing an empty active set: the engine must never interpret absence of policy as a safe transaction.) A aprovação construirá um `RuleSetSnapshot` completo e imutável com pelo menos uma regra ativa, versão monotônica, hash e versões exatas das regras. O JSON Schema usará `minItems: 1`, o serviço de controle recusará a retirada da última regra e o motor tratará snapshot vazio como inválido. O tópico compactado com chave `ACTIVE` alimentará um repositório global do Kafka Streams. A restauração desse repositório precede o processamento normal de tarefas; a prontidão exige que exista um snapshot válido carregado. O processador de atualização valida contrato, hash, versão e DSL antes de substituir a referência imutável usada por novas avaliações. Uma atualização inválida mantém o último snapshot válido. O MVP local deve publicar o primeiro snapshot antes de enviar transações; um bootstrap independente que bloqueia o consumo até um end offset conhecido fica como endurecimento produtivo. Cada avaliação registra sua `rulesetVersion`, e o plano distingue `desiredVersion`, `publishedVersion` e `loadedVersion`. Rege R8, R10, R11, R12, R13, R28, R32, R33.
+- KTD11. **Validação prévia, aprovação transacional e outbox ordenada.** (session-settled: user-directed — chosen over separate submit and activate commands: approval is the single human action that promotes an immutable change.) PostgreSQL foi escolhido em vez de MongoDB ou DynamoDB porque transações relacionais, restrições e JSONB atendem ao fluxo, à auditoria e à outbox sem adicionar outro modelo de persistência. Depois de autenticar, autorizar e negar autoaprovação, o serviço bloqueia `RULESET_HEAD`, monta o snapshot candidato e valida integralmente AST, limites, schema, conjunto não vazio, serialização canônica, hash e tamanho compatível com a configuração do Kafka. Qualquer falha determinística é auditada e aborta a operação antes de mudar o status da `RuleVersion` ou criar snapshot/outbox. Somente então o serviço marca a versão como `APPROVED`, atualiza o estado desejado, grava a auditoria de sucesso e insere o `OutboxEvent` `PENDING` na mesma transação. A API retorna `202 Accepted` sem aguardar Kafka. Um relay automático executado em segundo plano dentro do `fraud-control-service` procura pendências enquanto a aplicação está ativa e considera sempre a menor versão `PENDING`, mesmo quando ela está em backoff. (session-settled: user-approved — chosen over coalescing unpublished snapshots: every approved snapshot is published in monotonic order so the audit trail and the observed rollout remain complete.) Somente se a primeira versão estiver elegível por `next_attempt_at` ele a publica; caso contrário, nenhuma versão posterior avança. Ele pode manter uma transação curta aberta durante o ack Kafka com timeout estrito porque mudanças de regra são raras. Falhas transitórias usam backoff exponencial limitado por um teto, continuam sendo tentadas sem pular a versão e geram log/métrica crítica quando excedem o limiar operacional; U6 ou a plataforma produtiva converte esse sinal em alerta. Após o ack, o relay marca outbox e `publishedVersion` na mesma transação. Uma falha entre publicação e commit causa republicação segura da mesma identidade, versão e hash. Rege R8, R9, R10, R11, R29, R31.
+- KTD12. **Estado do caminho crítico em RocksDB com log de alterações Kafka.** Repositórios separados manterão integridade e deduplicação, histórico temporal por cliente e último conjunto de regras válido. O horizonte online inicial será 24 horas para identidade, suficiente para reentregas e recuperação operacional do MVP; a maior janela será 10 minutos e a retenção do histórico, 15 minutos. A retenção de sete dias da entrada serve a investigação restrita, não autoriza replay no fluxo online depois que a identidade expira. O desenho de backtest futuro usa `runId` próprio e mantém notificações externas bloqueadas. Esses valores são demonstrativos e configuráveis. Rege R14, R15, R19, R20, R21, R26, R38.
+- KTD13. **Tempo do evento sem espera artificial.** `occurredAt` será o timestamp do registro. O MVP não retém eventos aguardando reordenação. A regra de janela consulta fatos com horário menor ou igual ao evento corrente dentro dos 15 minutos retidos; ausência de histórico suficiente produz `NOT_EVALUATED`. Marcas d'água, classificação detalhada de atraso e atualização de avaliações passadas permanecem fora do código obrigatório. Rege R20, R21, R22, R27.
 - KTD14. **Tabela formal de agregação dos resultados.** A agregação ocorre somente sobre um snapshot válido com ao menos uma regra ativa. Qualquer `MATCHED` produz `SUSPICIOUS`; sem correspondência e com pelo menos um `NOT_EVALUATED` produz `INCONCLUSIVE`; todas as regras aplicáveis em `NO_MATCH` produzem `NOT_SUSPICIOUS`. Evento estruturalmente inválido não é aceito e não produz avaliação. Rege R3, R12, R13, R21, R23.
-- KTD15. **Caixa de entrada, supressão e registro de entregas idempotentes no notificador.** O consumidor persistirá uma solicitação `PENDING` com unicidade por `notificationRequestId` antes de confirmar o offset; um despachante separado assumirá pendências por concessão temporária. Antes do canal externo, uma janela configurável por referência opaca de cliente, categoria e canal limitará notificações repetitivas; solicitações excedentes serão registradas como `SUPPRESSED` e publicarão resultado, sem ocultar nem suprimir o alerta interno. O adaptador SMTP usará `Message-ID` determinístico e consultará o Mailpit antes de repetir uma tentativa `SENDING` ambígua. Em produção, o canal deverá oferecer chave de idempotência ou consulta de status; SMTP puro não fornece processamento exatamente uma vez. Rege R6, R16, R18, R23, R24, R28.
-- KTD16. **Kafka como log de integração, não como banco de consulta.** (decisão consolidada na sessão: aprovada pelo usuário — escolhida em vez de uma gravação síncrona no PostgreSQL e de um modelo de leitura no MVP porque o Kafka mantém atômica a transação da avaliação e permite que consumidores se recuperem por reexecução.) Kafka UI permitirá inspeção local; Prometheus/Grafana observarão agregados; um projetor para DynamoDB, OpenSearch ou outro modelo de leitura dependerá de consultas reais e fica fora do MVP. Rege R3, R4, R27, R30, R31, R33.
-- KTD17. **Falhas classificadas por fronteira.** Payload inválido seguirá para DLQ sanitizada; conflito de identidade seguirá para quarentena restrita; falha transitória do notificador seguirá novas tentativas limitadas e DLQ; erro interno inesperado do motor interromperá a partição e alertará a operação. A quarentena será um registro operacional de referência, não uma fila automática de nova tentativa nem uma segunda cópia do payload: guardará coordenadas do registro original, hashes e códigos de motivo. A investigação decidirá entre descartar o evento inválido ou solicitar ao produtor um evento corrigido; qualquer reexecução será explícita, autorizada e auditada. A retenção do tópico de entrada cobrirá a janela local de investigação da quarentena; em produção, arquivo protegido atenderá períodos maiores. Kafka indisponível pausa o processamento e não fabrica uma avaliação `INCONCLUSIVE`. Rege R23, R24, R25, R29, R33.
+- KTD15. **Registro de entrega idempotente no notificador.** O consumidor persistirá uma solicitação com unicidade por `notificationRequestId` e fará uma transição condicional de `PENDING` ou `FAILED` para `SENDING` antes do SMTP. Somente quem obtiver essa transição envia. Uma solicitação já `SENT` não causa novo SMTP, mas seu `NotificationResult` determinístico pode ser republicado antes do commit do offset. O contato fictício será resolvido apenas dentro do notificador. O MVP não recupera automaticamente uma linha `SENDING` abandonada nem resolve a janela entre aceitação SMTP e persistência de `SENT`; em produção, lease e chave de idempotência ou consulta de status fecham essas lacunas. Supressão, circuit breaker, reconciliação SMTP e DLQ automática ficam como evoluções. Rege R6, R16, R18, R23, R24, R28.
+- KTD16. **Kafka como log de integração, não como banco de consulta.** (decisão consolidada na sessão: aprovada pelo usuário — escolhida em vez de uma gravação síncrona no PostgreSQL e de um modelo de leitura no MVP porque o Kafka mantém atômica a transação da avaliação e permite que consumidores se recuperem por reexecução.) O smoke e consumidores de linha de comando permitem inspeção local obrigatória; U6 pode acrescentar Kafka UI e Prometheus/Grafana. Um projetor para DynamoDB, OpenSearch ou outro modelo de leitura dependerá de consultas reais e fica fora do MVP. Rege R3, R4, R27, R30, R31, R33.
+- KTD17. **Falhas classificadas por fronteira.** Payload inválido seguirá para tópico de referência inválida; conflito de identidade seguirá para tópico de referência de quarentena; nenhum deles levará o payload bruto nem alterará o histórico. Falha do notificador termina em estado observável e pode ser repetida com a mesma identidade. Erro interno inesperado do motor interrompe o processamento em vez de fabricar uma avaliação. Investigação, retenção protegida, reexecução auditada, backoff, circuit breaker e DLQ automática ficam documentados para produção. Kafka indisponível pausa o processamento e não fabrica `INCONCLUSIVE`. Rege R23, R24, R25, R29, R33.
 - KTD18. **Segurança local representativa e produção completa.** (decisão consolidada na sessão: aprovada pelo usuário — escolhida em vez de reproduzir TLS/IAM corporativo localmente porque autorização executável na API e minimização de dados demonstram as fronteiras sem deslocar o núcleo de streaming.) O ambiente local validará JWT, `iss`, `aud`, expiração e `sub`, aceitará somente um algoritmo assimétrico declarado e chave pública/JWKS configurada, aplicará RBAC, separará redes e credenciais de banco, não versionará segredos e usará dados fictícios. Autoria, aprovação e ator de auditoria serão preenchidos no servidor exclusivamente a partir do `sub` já validado; os DTOs de escrita rejeitarão campos de identidade administrativa informados pelo cliente. Testes de integração gerarão chaves assimétricas efêmeras em diretório temporário. O bootstrap local criará um par RSA e tokens de desenvolvimento para `rule-author` e `rule-approver` sob `.local/security/`, diretório ignorado pelo Git; somente a chave pública será montada no serviço e a chave privada ficará restrita ao emissor local. Produção usará emissor corporativo/JWKS, MSK IAM/TLS, KMS, identidades de carga de trabalho, Secrets Manager e ACLs por tópico. Rege R9, R28, R29, R35.
-- KTD19. **Observabilidade sem cardinalidade por cliente.** Micrometer/Prometheus medirá vazão, latência, atraso de consumo, restauração, regras, inconclusivos, conflitos e entregas. Logs JSON e rastros usarão correlação, mas payloads, contatos e identificadores de cliente não serão rótulos de métricas. Kafka UI e Mailpit serão superfícies de demonstração. Rege R6, R27, R28, R33, R34.
-- KTD20. **Testes por camada com infraestrutura real nas bordas.** JUnit 5 e AssertJ cobrirão domínio; `TopologyTestDriver` cobrirá topologia e repositórios de estado; Testcontainers cobrirá Kafka/PostgreSQL/Mailpit; testes Python cobrirão caixa-preta, verificação de fumaça e carga. Desempenho e caos não bloquearão a etapa comum, mas terão protocolos e resultados versionados. Rege R26, R27, R35, R36.
+- KTD19. **Observabilidade em dois níveis e sem cardinalidade por cliente.** A entrega obrigatória expõe prontidão do motor, status do ruleset, saídas consumíveis e logs correlacionados sem payload ou contato. Mailpit é a superfície externa de demonstração. U6 opcional adiciona Micrometer/Prometheus, Kafka UI, Grafana, painel e alertas para vazão, latência, atraso de consumo, ruleset e notificações, sem identificadores de cliente como rótulo. Rege R6, R27, R28, R33, R34.
+- KTD20. **Testes essenciais por camada.** JUnit 5 e AssertJ cobrem domínio; `TopologyTestDriver` cobre topologia e estado; Testcontainers cobre as bordas Kafka/PostgreSQL/Mailpit; uma verificação de fumaça comprova o fluxo principal. Testes destrutivos, caos, backtest e carga não bloqueiam a entrega e só geram evidência quando realmente executados. Rege R26, R27, R35, R36.
 - KTD21. **Mapeamento AWS sem infraestrutura como código executável no MVP.** Produção mapeará Kafka para Amazon MSK, aplicações para ECS ou EKS, PostgreSQL para Aurora/RDS, schemas para AWS Glue Schema Registry, segredos para Secrets Manager, criptografia para KMS, telemetria para CloudWatch/OpenTelemetry e arquivo para S3. Terraform/CDK e multi-região ficam fora do MVP. Rege R26, R29, R30, R31, R37.
 
 ### Desenho técnico de alto nível
@@ -345,12 +357,12 @@ flowchart TB
   Notifier -->|SMTP + Message-ID| Mailpit[Mailpit]
   Notifier -->|NotificationResult| Kafka
 
-  Engine --> Metrics[Prometheus]
-  RuleApi --> Metrics
-  Relay --> Metrics
-  Notifier --> Metrics
-  Metrics --> Grafana[Grafana]
-  Kafka --> KafkaUi[Kafka UI]
+  Engine -. U6 opcional .-> Metrics[Prometheus]
+  RuleApi -. U6 opcional .-> Metrics
+  Relay -. U6 opcional .-> Metrics
+  Notifier -. U6 opcional .-> Metrics
+  Metrics -. U6 opcional .-> Grafana[Grafana]
+  Kafka -. U6 opcional .-> KafkaUi[Kafka UI]
 ```
 
 No ambiente produtivo, Kafka torna-se Amazon MSK; as três unidades implantáveis executam em ECS/EKS; os schemas são registrados no AWS Glue Schema Registry; e os bancos lógicos recebem credenciais e isolamento independentes. O `detection-engine` não acessa PostgreSQL no caminho crítico.
@@ -377,10 +389,14 @@ sequenceDiagram
   E->>O: avaliação e alerta/solicitação condicionais
   Note over E,O: uma transação Kafka com estado e offsets
   O-->>N: CustomerNotificationRequested
-  N->>D: persistir entrada PENDING na caixa de entrada
-  N->>D: assumir pendência por concessão temporária
-  N->>M: enviar Message-ID determinístico
-  N->>D: registrar resultado terminal ou passível de nova tentativa
+  N->>D: inserir ou localizar por notificationRequestId
+  N->>D: tentar transição condicional para SENDING
+  alt entrega já concluída
+    D-->>N: SENT; não repetir
+  else nova entrega
+    N->>M: enviar e-mail fictício
+    N->>D: registrar SENT ou FAILED
+  end
   N->>O: NotificationResult
 ```
 
@@ -388,13 +404,13 @@ sequenceDiagram
 
 ```mermaid
 flowchart TB
-  RuleSet{Ruleset válido carregado?} -->|não| NotReady[Topologia não inicia<br/>offset permanece intacto]
+  RuleSet{Ruleset válido carregado?} -->|não| NotReady[Instância não pronta<br/>não enviar tráfego]
   RuleSet -->|sim| Start[Registro recebido]
   Start --> Schema{Schema e limites válidos?}
-  Schema -->|não| Invalid[DLQ sanitizada<br/>sem avaliação]
+  Schema -->|não| Invalid[Referência inválida sanitizada<br/>sem avaliação]
   Schema -->|sim| Identity{Identidade conhecida?}
   Identity -->|mesma impressão digital| Duplicate[Ignorar reentrega<br/>sem novos efeitos]
-  Identity -->|colisão ou transactionId conflitante| Quarantine[Quarentena restrita]
+  Identity -->|colisão ou transactionId conflitante| Quarantine[Referência de quarentena<br/>sem avaliação]
   Identity -->|novo| Evaluate[Avaliar regras com tempo do evento]
   Evaluate --> Matched{Algum MATCHED?}
   Matched -->|sim| Suspicious[SUSPICIOUS<br/>avaliação + alerta + solicitação]
@@ -413,8 +429,7 @@ sequenceDiagram
   participant D as PostgreSQL
   participant R as Publicador de fundo da outbox
   participant K as Tópico de regras
-  participant E1 as Instância A do motor
-  participant E2 as Instância B do motor
+  participant E as Instância do motor
 
   alt nova regra
     A->>C: criar regra com JWT
@@ -443,22 +458,17 @@ sequenceDiagram
     K-->>R: confirmação do broker
     R->>D: marcar outbox PUBLISHED<br/>avançar publishedVersion e confirmar a transação
   end
-  par rollout assíncrono na instância A
-    K-->>E1: snapshot N
-    E1->>E1: validar e substituir o snapshot completo
-  and rollout assíncrono na instância B
-    K-->>E2: snapshot N
-    E2->>E2: validar e substituir o snapshot completo
-  end
-  Note over E1,E2: as instâncias podem convergir em momentos diferentes<br/>cada avaliação usa uma única versão completa
-  Note over D,E2: desiredVersion fica no PostgreSQL<br/>publishedVersion exige confirmação do Kafka<br/>loadedVersion é exposta por instância do motor
+  K-->>E: snapshot N
+  E->>E: validar e substituir o snapshot completo
+  Note over E: cada avaliação usa uma única versão completa
+  Note over D,E: desiredVersion fica no PostgreSQL<br/>publishedVersion exige confirmação do Kafka<br/>loadedVersion é exposta pelo motor
 ```
 
 #### Semântica do rollout dentro do motor
 
-O rollout é uma mudança de configuração, não uma nova implantação da aplicação. O tópico `fraud.ruleset.active.v1` tem uma partição, compactação e a chave constante `ACTIVE`; seu valor é sempre o snapshot completo. Cada instância do Kafka Streams mantém uma cópia local registrada por `Topology.addGlobalStore`. O processador ligado à fonte global é o único escritor: recebe bytes, valida e compila o snapshot e só então atualiza o store. Os processadores de transação o acessam apenas para leitura. A plataforma restaura esse repositório no início e o mantém atualizado por uma thread separada.
+O rollout é uma mudança de configuração, não uma nova implantação da aplicação. O tópico `fraud.ruleset.active.v1` tem uma partição, compactação e a chave constante `ACTIVE`; seu valor é sempre o snapshot completo. Cada instância do Kafka Streams mantém uma cópia local registrada por `Topology.addGlobalStore`. O processador ligado à fonte global recebe bytes, valida e compila o snapshot e só então substitui a referência imutável que os processadores de transação consultam.
 
-Como o próprio store ainda não existe antes de `KafkaStreams.start()`, o bootstrap não tenta consultá-lo prematuramente. Um consumidor Kafka independente faz somente a verificação inicial do tópico até o end offset, sem confirmar offsets de negócio. Encontrado ao menos um snapshot válido, a aplicação inicia Kafka Streams; o `start()` aguarda a restauração do store global, que reaplica a mesma validação. Se o tópico estiver vazio ou não contiver snapshot válido, a aplicação continua viva para diagnóstico, mas não pronta e sem consumir transações.
+O Kafka Streams restaura o global store antes do processamento normal das tarefas. A prontidão permanece negativa enquanto não houver snapshot válido carregado. O roteiro local inicia o plano de controle, aprova e publica o primeiro snapshot, aguarda `loadedVersion` e somente depois envia transações. Um consumidor independente que bloqueia o início até um end offset conhecido é um endurecimento produtivo adiado.
 
 Ao receber a versão `N`, cada instância executa localmente esta sequência:
 
@@ -467,9 +477,9 @@ Ao receber a versão `N`, cada instância executa localmente esta sequência:
 3. Substitui de uma vez a referência local somente depois que toda a validação termina.
 4. Atualiza `loadedVersion` e a telemetria de convergência.
 
-O processador de transações captura a referência corrente uma única vez no início da avaliação. Uma avaliação que começou com `N-1` termina com `N-1`; a seguinte pode usar `N`. O resultado sempre registra a versão usada. Como as cópias globais não são sincronizadas pelo tempo do stream, duas instâncias podem usar `N-1` e `N` durante uma curta janela de convergência. O MVP aceita esse rollout progressivo e observável; um corte global coordenado exigiria barreira por `effectiveAt`, pausa das partições ou coordenação externa e fica fora do escopo.
+O processador de transações captura a referência corrente uma única vez no início da avaliação. Uma avaliação que começou com `N-1` termina com `N-1`; a seguinte pode usar `N`. O resultado sempre registra a versão usada. Em produção, cópias globais de várias instâncias podem usar `N-1` e `N` durante uma curta janela de convergência. O MVP executável comprova a troca em uma instância; convergência multi-instância e corte global coordenado ficam fora do escopo obrigatório.
 
-Versão menor é ignorada. Mesma versão com mesmo hash é republicação idempotente. Mesma versão com outro hash ou versão maior inválida é rejeitada com sinal operacional, preservando o último snapshot válido. Uma instância sem nenhum snapshot válido permanece não pronta e não inicia o consumo de transações.
+Versão menor é ignorada. Mesma versão com mesmo hash é republicação idempotente. Mesma versão com outro hash ou versão maior inválida é rejeitada com sinal operacional, preservando o último snapshot válido. Uma instância sem snapshot válido permanece não pronta e o roteiro local não envia tráfego a ela.
 
 ### Modelo de contratos
 
@@ -493,21 +503,20 @@ Cada `RuleResult` transportará ID/versão da regra, `MATCHED`, `NO_MATCH` ou `N
 |---|---|---:|---|---|---|
 | `fraud.transaction.received.v1` | `transactionId` | 12 | exclusão, 7 d, com limite de bytes local | produtor/ferramenta de carga | motor de detecção |
 | `fraud.ruleset.active.v1` | constante `ACTIVE` | 1 | compactação | serviço de controle de fraude | repositório global do motor de detecção |
-| `fraud.assessment.created.v1` | `transactionId` | 12 | exclusão, 30 d | motor de detecção | Kafka UI/consumidores internos |
-| `fraud.alert.internal.v1` | `alertId` | 12 | exclusão, 30 d | motor de detecção | consumidor antifraude/Kafka UI |
+| `fraud.assessment.created.v1` | `transactionId` | 12 | exclusão, 30 d | motor de detecção | consumidores internos; Kafka UI se U6 existir |
+| `fraud.alert.internal.v1` | `alertId` | 12 | exclusão, 30 d | motor de detecção | consumidor antifraude; Kafka UI se U6 existir |
 | `fraud.notification.requested.v1` | `notificationRequestId` | 12 | exclusão, 7 d | motor de detecção | serviço de notificação |
-| `fraud.notification.result.v1` | `notificationRequestId` | 12 | compactação e exclusão, 30 d | serviço de notificação | operação/Kafka UI |
+| `fraud.notification.result.v1` | `notificationRequestId` | 12 | compactação e exclusão, 30 d | serviço de notificação | operação; Kafka UI se U6 existir |
 | `fraud.transaction.invalid.v1` | hash da referência de origem | 6 | exclusão, 7 d, restrito | motor de detecção | somente operação |
 | `fraud.transaction.quarantine.v1` | hash da referência da transação | 6 | exclusão, 7 d, restrito | motor de detecção | somente operação |
-| `fraud.notification.dlq.v1` | `notificationRequestId` | 6 | exclusão, 7 d, restrito | serviço de notificação | somente operação |
 
 Os tópicos internos de reparticionamento e logs de alterações do Kafka Streams usarão nomes estáveis explícitos. O fator de replicação local é 1 porque o Compose possui um broker; produção usa pelo menos 3 onde a topologia do MSK permitir. Os valores de retenção dos tópicos são padrões de demonstração, não uma política legal de retenção.
 
 #### Semântica operacional da quarentena
 
-A quarentena não é um depósito alternativo de transações nem uma fila de retry. Ela contém somente uma referência segura ao registro original e ao conflito detectado. No MVP, a operação consegue localizar o original pelas coordenadas Kafka enquanto a retenção de sete dias estiver disponível, inspecionar a causa com acesso restrito e registrar uma disposição: evento inválido descartado ou correção solicitada ao produtor. Não existe botão ou consumidor que devolva automaticamente o mesmo registro ao fluxo, pois ele repetiria o conflito e poderia duplicar efeitos.
+A quarentena não é um depósito alternativo de transações nem uma fila de retry. O MVP publica somente uma referência segura ao registro original e ao conflito detectado. Enquanto a retenção da entrada estiver disponível, as coordenadas permitem investigação manual com acesso restrito. Não existe botão, API ou consumidor que devolva automaticamente o mesmo registro ao fluxo.
 
-Uma reexecução produtiva só ocorre após correção da causa, com identidade autorizada, intervalo delimitado, auditoria e notificações externas bloqueadas até validação. O mecanismo administrativo completo de liberação/replay fica fora do MVP; o case entrega o contrato de referência, a retenção alinhada, sinais operacionais e o runbook. Se o limite de bytes local remover o original antes do prazo, o runbook registra “origem indisponível” como resultado da investigação, sem criar um ciclo de vida persistente da quarentena; em produção, arquivo criptografado e restrito sustenta a política institucional.
+Uma reexecução produtiva só ocorre após correção da causa, com identidade autorizada, intervalo delimitado, auditoria e notificações externas bloqueadas até validação. O mecanismo administrativo de investigação e replay fica fora do MVP e é descrito como evolução no documento de arquitetura. Se a entrada original já tiver expirado, a referência não permite reconstruir seu payload; em produção, arquivo criptografado e restrito deve sustentar a política institucional.
 
 ### Modelo de persistência
 
@@ -521,7 +530,6 @@ erDiagram
   RULESET_SNAPSHOT ||--o{ OUTBOX_EVENT : publica
   RULE_VERSION ||--o{ AUDIT_EVENT : auditada_por
   RULESET_SNAPSHOT ||--o{ AUDIT_EVENT : auditado_por
-  NOTIFICATION_DELIVERY ||--o{ NOTIFICATION_ATTEMPT : possui
 
   RULE {
     uuid rule_id PK
@@ -592,18 +600,11 @@ erDiagram
     string customer_reference_hash
     string channel
     string status
+    int attempt_count
+    string last_error_code
     string message_id
     string provider_reference
     timestamp updated_at
-  }
-  NOTIFICATION_ATTEMPT {
-    uuid attempt_id PK
-    uuid notification_request_id FK
-    int attempt_number
-    string channel
-    string outcome
-    string sanitized_reason
-    timestamp attempted_at
   }
 ```
 
@@ -616,6 +617,8 @@ A aprovação pertence ao agregado global `RULESET_HEAD`: sua linha constante `A
 `RULESET_SNAPSHOT_ITEM` materializa, com integridade referencial, quais versões compõem cada snapshot e em qual ordem são avaliadas. Ela é a composição histórica canônica no PostgreSQL; não há uma segunda cópia JSONB do ruleset no snapshot. A validação anterior ao commit cobre a AST, seus limites, o schema do envelope, a presença de ao menos um item, a serialização canônica, o hash e o tamanho máximo publicável pelo Kafka. Na mesma transação, a aplicação grava em `OUTBOX_EVENT.canonical_payload` exatamente o envelope JSON canônico já validado. O `content_hash` usa SHA-256 sobre a representação UTF-8 canonicalizada do corpo do snapshot, sem o próprio campo de hash; mapas são ordenados lexicograficamente e números/timestamps seguem a representação única definida pelo contrato. O relay publica exatamente esse texto, e um teste de persistência-releitura-republicação comprova que o hash não muda. Snapshot, itens, mudanças de estado, head, auditoria e outbox são confirmados na mesma transação.
 
 O relay bloqueia `RULESET_HEAD` e consulta o `OUTBOX_EVENT` `PENDING` de menor `aggregate_version` sem filtrar inicialmente por `next_attempt_at`. Se essa primeira linha ainda estiver em backoff, nenhuma versão posterior pode avançar; se estiver elegível, o relay mantém a transação aberta enquanto envia ao Kafka com timeout curto. Falha atualiza tentativa, código sanitizado e próxima execução, enquanto sucesso marca a outbox como `PUBLISHED` e avança `RULESET_HEAD.published_version` antes do commit. Isso garante ordem mesmo com várias instâncias do serviço. Nenhum snapshot aprovado é coalescido ou pulado: após uma indisponibilidade, `N`, `N+1` e `N+2` são publicados nessa ordem, ainda que versões intermediárias possam ficar ativas por pouco tempo durante o escoamento. Esse custo preserva a trilha completa; cada avaliação registra a versão efetivamente usada. Publicação duplicada após um ack ambíguo usa o mesmo `snapshot_id`, versão, hash e chave compactada `ACTIVE`; o motor trata mesma versão/mesmo hash como no-op e rejeita mesma versão/hash diferente.
+
+`NOTIFICATION_DELIVERY` usa `PENDING`, `SENDING`, `SENT` e `FAILED`. Uma atualização condicional concede o envio somente a quem troca `PENDING` ou `FAILED` por `SENDING`; reentrega de `SENT` apenas republica o resultado determinístico. Uma falha conhecida incrementa `attempt_count`, sanitiza `last_error_code` e grava `FAILED`. Uma queda enquanto a linha está `SENDING` exige recuperação manual no MVP; lease e reconciliação do provedor pertencem ao desenho produtivo.
 
 Um único container PostgreSQL atenderá o ambiente local, com schemas e usuários separados para `rules`, `notification` e `customer_fixture`. O motor não terá credencial de banco. Flyway possuirá migrations independentes por serviço. A credencial da aplicação poderá inserir auditoria, mas não atualizar ou apagar seus registros; produção exportará a trilha para armazenamento imutável/SIEM.
 
@@ -640,27 +643,39 @@ Uma identidade pode acumular permissões. A segregação entre autor e aprovador
 
 No MVP local haverá duas identidades autenticadas: `rule-author`, com `RULE_READ` e `RULE_WRITE`, e `rule-approver`, com `RULE_READ` e `RULE_APPROVE`. Não existirá `RULE_ACTIVATE`: a aprovação é a única ação humana que promove uma mudança imutável para o estado desejado. Em produção, uma identidade pode acumular as duas permissões conforme a política do banco, mas a verificação contextual sempre impede `approver.sub == author.sub`.
 
-O status REST deriva `desiredVersion` de `RULESET_HEAD.desired_version` e `publishedVersion` da maior versão confirmada após ack do Kafka. `loadedVersion` não é inventada pelo serviço de controle: cada instância do motor a expõe por health/Actuator e por uma métrica de baixa cardinalidade. Assim, a operação distingue outbox pendente, propagação Kafka concluída e instância ainda defasada, sem prometer confirmação global síncrona. O SLO de 500 ms das transações não se aplica ao rollout de regras; a latência de convergência será medida e exibida, sem meta numérica fictícia antes do benchmark.
+O status REST deriva `desiredVersion` de `RULESET_HEAD.desired_version` e `publishedVersion` da maior versão confirmada após ack do Kafka. `loadedVersion` não é inventada pelo serviço de controle: o motor a expõe em sua prontidão e, se U6 existir, também em métrica de baixa cardinalidade. Assim, a operação distingue outbox pendente, propagação Kafka concluída e motor ainda defasado, sem prometer confirmação global síncrona. O SLO de 500 ms das transações não se aplica ao rollout de regras; a latência de convergência só será apresentada se tiver sido medida.
 
 ### DSL segura de regras
 
-O schema da DSL modelará uma AST fechada. Nós do tipo folha farão comparação de atributo ou agregação `COUNT`/`SUM` em uma janela; nós compostos serão `ALL` e `ANY`. Campos, operadores, tipos, moedas e durações serão definidos por listas de permissões. A maior janela não poderá exceder o histórico configurado.
+O schema executável do MVP modelará uma AST fechada. Nós do tipo folha suportarão limite monetário e `COUNT` em janela; nós compostos serão `ALL` e `ANY`. Campos, operadores, tipos, moedas e durações serão definidos por listas de permissões. A maior janela não poderá exceder o histórico configurado. `SUM` e comparações adicionais só entram em uma evolução que atualize conjuntamente schema, validação e motor.
 
 O conjunto inicial demonstrará:
 
 - Valor individual acima de um limite.
 - Quantidade de transações do cliente dentro de uma janela.
-- Soma por cliente e moeda dentro de uma janela.
-- Regra composta, como valor alto e canal ou país de risco.
+- Uma composição `AND` ou `OR` entre as primitivas implementadas.
 
-O estado será atualizado somente depois de validação e verificação de identidade. A semântica de contagem/soma incluirá o evento corrente. Duplicatas, conflitos e eventos inválidos não alterarão o histórico.
+Soma por janela e comparações adicionais permanecem extensões previstas da AST, sem fazer parte da conclusão obrigatória.
+
+Os nós compostos usam lógica ternária explícita:
+
+| Nó | Prioridade dos resultados filhos | Resultado |
+|---|---|---|
+| `ANY` | existe `MATCHED` | `MATCHED` |
+| `ANY` | nenhum `MATCHED` e existe `NOT_EVALUATED` | `NOT_EVALUATED` |
+| `ANY` | todos `NO_MATCH` | `NO_MATCH` |
+| `ALL` | existe `NO_MATCH` | `NO_MATCH` |
+| `ALL` | nenhum `NO_MATCH` e existe `NOT_EVALUATED` | `NOT_EVALUATED` |
+| `ALL` | todos `MATCHED` | `MATCHED` |
+
+O estado será atualizado somente depois de validação e verificação de identidade. A contagem incluirá o evento corrente. Duplicatas, conflitos e eventos inválidos não alterarão o histórico.
 
 ### Fronteiras de segurança e privacidade
 
 | Fronteira | Controle local executável | Controle de produção |
 |---|---|---|
 | API REST de regras | token JWT assimétrico, validação de emissor/audiência/expiração/`sub`, RBAC, identidades persistidas somente a partir do contexto autenticado e separação entre autor e aprovador; chaves/tokens locais ficam em diretório ignorado | provedor corporativo de identidade por issuer/JWKS, MFA para pessoas, tokens de curta duração e acesso emergencial auditado |
-| Kafka | rede Compose isolada, dados fictícios e identidades distintas de cliente | MSK TLS, autenticação/autorização IAM, menor privilégio por tópico/grupo/ID transacional |
+| Kafka | rede Compose isolada e dados fictícios; o ambiente local não autentica clientes e `client.id` serve somente à observação | MSK TLS, autenticação/autorização IAM e ACL de menor privilégio; somente a identidade do serviço de controle pode escrever no tópico de ruleset |
 | PostgreSQL | schemas/usuários separados, acesso parametrizado, Flyway e sem exposição ao host | Aurora/RDS TLS, KMS, isolamento de rede, backups e rotação de credenciais |
 | Estado/logs de alterações | sem acesso externo direto e valores sanitizados | discos criptografados, MSK KMS, restauração e retenção restritas |
 | Notificação | solicitação sanitizada, registro de entregas e cadastro fictício | serviço autorizado de dados de clientes e API de idempotência/status do provedor |
@@ -672,11 +687,10 @@ O estado será atualizado somente depois de validação e verificação de ident
 
 ### Modelo de observabilidade
 
-- **Métricas:** vazão de entrada/saída, latência de avaliações confirmadas, percentual dentro de 500 ms, atraso de consumo, estado de tarefas/rebalanceamento, restauração dos repositórios de estado, contagens de deduplicação/conflito, eventos atrasados/antigos demais, estado da avaliação, severidade dos alertas, regras correspondentes, propagação do conjunto de regras, acúmulo da outbox, tentativas de notificação e falhas terminais.
-- **Logs:** JSON estruturado com timestamp, serviço, ID de rastreio, referência do evento/avaliação/alerta, resultado e código do motivo. Sem payload bruto, contato ou rótulos de métricas de alta cardinalidade.
-- **Rastros:** contexto de rastreio W3C propagado nos cabeçalhos Kafka desde a ingestão até a notificação. Os segmentos identificam validação, acesso ao estado, avaliação das regras e entrega externa sem registrar atributos sensíveis.
-- **Saúde:** a verificação de vida confirma o processo; a verificação de prontidão exige conectividade com Kafka, estado `RUNNING` do Streams e um conjunto de regras válido para o motor, além das dependências de banco/broker aplicáveis aos outros serviços.
-- **Painéis e alertas:** Grafana exibe SLO, atraso de consumo, vazão, inconclusivos, conflitos, DLQs, versões do conjunto de regras e saúde das notificações. Alertas disparam por consumo acelerado do orçamento do SLO, crescimento do atraso, ausência de conjunto de regras válido, falha na restauração de estado, acúmulo da outbox e taxa de falha das notificações.
+- **Obrigatório:** o motor expõe vida, prontidão e `loadedVersion`; o serviço de controle expõe o status desejado/publicado; todos os serviços usam logs com referências seguras, resultado e código do motivo. Nenhuma superfície contém payload bruto ou contato.
+- **Prontidão do motor:** exige Kafka Streams em execução e um ruleset válido carregado. O serviço de controle e o notificador verificam suas dependências indispensáveis sem confundir vida do processo com prontidão.
+- **Se der tempo - U6:** Prometheus coleta vazão, latência, atraso de consumo, deduplicação/conflito, resultado das avaliações, propagação do ruleset, outbox e notificações. Grafana apresenta esses sinais em um painel provisionado e sem identificadores pessoais.
+- **Evolução produtiva:** rastros W3C, alertas por orçamento do SLO, restauração de estado, DLQs e integração com SIEM/CloudWatch/OpenTelemetry.
 - **Qualidade de negócio:** picos imediatos são anomalias operacionais; a taxa confirmada de falsos positivos usa somente feedback posterior `FRAUD`, `LEGITIMATE` ou `UNKNOWN`.
 
 ### Mapeamento da produção na AWS
@@ -720,19 +734,15 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
 │   ├── detection-engine/
 │   └── notification-service/
 ├── tools/
-│   ├── system-tests/
-│   └── load-generator/
+│   └── load-test/                 # somente U8 opcional
 ├── infra/
 │   ├── kafka/
-│   ├── prometheus/
-│   └── grafana/
+│   ├── prometheus/                # somente U6 opcional
+│   └── grafana/                   # somente U6 opcional
 ├── scripts/
 └── docs/
     ├── architecture/
-    ├── decisions/
-    ├── operations/
-    ├── performance/
-    ├── security/
+    ├── performance/               # somente U8 opcional
     ├── testing/
     └── plans/
 ```
@@ -743,8 +753,8 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
 2. Implementar a DSL e o control plane antes de conectar rulesets dinâmicos ao motor.
 3. Construir a topologia do motor orientada por testes, começando por uma avaliação não suspeita e acrescentando estado, idempotência e saídas atômicas.
 4. Conectar o notificador depois que o contrato sanitizado estiver estável.
-5. Adicionar telemetria junto aos fluxos e concluir painéis, caos e carga após o caminho completo funcionar.
-6. Atualizar documentação e resultados com evidências reais, sem declarar números ainda não medidos.
+5. Concluir a verificação de fumaça e a documentação da entrega antes de iniciar qualquer opcional.
+6. Se houver tempo, provisionar o painel de observabilidade e depois executar carga; registrar somente evidências reais.
 
 ### Impacto em todo o sistema
 
@@ -775,25 +785,25 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
 |---|---|---|
 | Latência de confirmação do EOS excede o orçamento | A saída durável não atende R27 | Começar com EOS, registrar percentis ponta a ponta com leitura de dados confirmados, ajustar intervalo de confirmação/agrupamento e relatar honestamente o resultado medido. |
 | Chave de cliente sobrecarregada | Uma partição torna-se o teto de vazão | Gerar perfis enviesados, expor atraso por partição e documentar salting/agregação em dois estágios como trabalho futuro. |
-| Reparticionamentos de identidade consomem latência/vazão | A correção de R14/R15 compete com R27 | Nomear tópicos internos, medir cada estágio e manter a garantia global, salvo se evidências exigirem uma revisão explícita do desenho. |
+| Reparticionamento por cliente consome latência/vazão | O estado por cliente compete com R27 | Manter uma única redistribuição no MVP, nomear o tópico interno e registrar que reutilização global de `eventId` entre clientes não é detectada localmente. |
 | Estado cresce além do orçamento de disco | Restauração e processamento local degradam | Limitar janelas/TTL, estimar bytes por evento, expor tamanho do repositório e documentar capacidade por partição. |
 | Janela de versões mistas durante o rollout | Transações adjacentes em instâncias diferentes usam `N-1` e `N` | Snapshot imutável capturado por avaliação, versão monotônica no resultado, último válido conhecido e `loadedVersion` por instância; não prometer troca global simultânea. |
 | Acúmulo de snapshots após indisponibilidade | Versões intermediárias podem ficar ativas brevemente durante a recuperação | Publicar todas em ordem, observar idade/quantidade da outbox e registrar `rulesetVersion` em cada avaliação; documentar explicitamente que não há coalescimento no MVP. |
-| Falha persistente na publicação bloqueia versões posteriores | O estado desejado avança no banco, mas o motor permanece no último conjunto publicado | Validar todo erro determinístico antes da aprovação; para falhas de infraestrutura, usar backoff com teto, alerta crítico, reconciliação e nunca pular a menor versão pendente. |
+| Falha persistente na publicação bloqueia versões posteriores | O estado desejado avança no banco, mas o motor permanece no último conjunto publicado | Validar erros determinísticos antes da aprovação, usar backoff com teto, emitir log/métrica crítica e nunca pular a menor versão; U6 ou a plataforma produtiva transforma o sinal em alerta. |
 | Ponteiro de regras mais recente é incompatível | Uma instância nova não encontra snapshot válido após compactação | Compartilhar validação de contrato, implantar consumidores antes do produtor, bloquear schema incompatível e publicar versão corretiva maior; a instância vazia falha fechada como não pronta. |
 | Regra causa uso excessivo de CPU/estado | SLO ou disponibilidade degradam | Lista de permissões tipada, limites de complexidade/janela, validação antes da publicação e métricas de tempo por regra. |
 | Validação JSON é cara | CPU reduz os TPS alcançáveis | Compilar schemas uma vez, medir a validação separadamente e evitar conversões intensivas em reflexão. |
-| Resultado SMTP é ambíguo | E-mail duplicado ou perdido | Registro de entregas, `Message-ID` determinístico, reconciliação com Mailpit e requisito explícito para o provedor produtivo. |
+| Resultado SMTP é ambíguo | E-mail pode ser duplicado entre aceitação e persistência | Declarar a janela no MVP e exigir chave de idempotência ou consulta de status no provedor produtivo. |
 | Broker local não possui alta disponibilidade | A demonstração não comprova failover no nível de nó | Declarar a limitação, testar reinício/reexecução do processo e descrever estratégia de replicação/espera no MSK. |
 | Dados sensíveis vazam por superfícies secundárias | Violação de LGPD/segurança | Testes com marcadores sintéticos nas saídas/logs/rastros/DLQs e diagnósticos restritos sem payload. |
-| Referência de quarentena perde a origem | Investigação ou reexecução deixam de ser possíveis | Alinhar a retenção temporal da entrada e da quarentena, limitar bytes no ambiente local, registrar “origem indisponível” no procedimento e usar arquivo protegido conforme a política produtiva. |
+| Referência de quarentena perde a origem | Investigação ou reexecução deixam de ser possíveis | O MVP demonstra apenas isolamento sanitizado; a documentação produtiva alinha retenção da entrada, acesso restrito, arquivo protegido e reexecução auditada. |
 | Escopo desloca a correção do núcleo | Extras polidos escondem semânticas ausentes | Tratar UI de consulta, infraestrutura como código, aprendizado de máquina e provedores reais como adiados até o contrato de verificação passar. |
 
 ### Notas de implementação adiadas
 
 - A quantidade final de threads e de partições de produção depende da vazão medida por partição; os padrões locais estabelecem uma linha de base reproduzível, não uma afirmação de capacidade.
 - Os índices SQL exatos seguem os padrões de consulta implementados, mas as restrições de unicidade e bloqueio otimista são obrigatórias.
-- A imagem do Kafka UI, o leiaute do painel e os limites de recursos dos containers podem mudar durante a integração sem alterar os contratos.
+- Se U6 for executada, a imagem do Kafka UI, o leiaute do painel e os limites de recursos dos containers podem mudar durante a integração sem alterar os contratos.
 - Um modelo de leitura produtivo deve ser escolhido a partir de padrões explícitos de consulta, busca e acesso analítico; DynamoDB, OpenSearch e S3/Athena resolvem consultas diferentes.
 
 ---
@@ -906,11 +916,12 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
   - Abrange AE6. Uma indisponibilidade de publicação deixa a outbox pendente e expõe seu acúmulo, enquanto o conjunto de regras existente no motor permanece inalterado.
 - **Verificação:** Uma aprovação autorizada e integralmente válida cria atomicamente um snapshot não vazio, auditado com sujeitos vindos do JWT e uma outbox pendente; o relay publica todos os snapshots em ordem e sem interferência humana, e solicitações negadas, repetidas ou concorrentes não corrompem o estado.
 
-### U3. Domínio de avaliação determinística das regras
+### U3. Núcleo determinístico de avaliação
 
-- **Objetivo:** Implementar a AST limitada das regras, contratos de avaliação sem estado/com estado, agregação dos resultados e identidades determinísticas de saída, independentemente das questões de execução do Kafka.
-- **Requisitos:** R3, R4, R5, R7, R13, R16, R21, R23, R28, R35; F1, F2, F6; AE1, AE2, AE9, AE10; KTD5, KTD8, KTD9, KTD14.
-- **Dependências:** U1.
+- **Prioridade:** Obrigatória.
+- **Objetivo:** Implementar uma biblioteca de domínio pura que avalia regras sem estado e com estado, agrega resultados explicáveis e gera identidades determinísticas sem depender do Kafka.
+- **Requisitos:** R3-R5, R7, R13, R16, R21, R28, R35; F1, F2, F6; AE1, AE2, AE9, AE10; KTD5, KTD8, KTD9, KTD14.
+- **Dependências:** U1 e U2, porque a lista permitida pelo plano de controle deve coincidir com os tipos executados pelo motor.
 - **Arquivos:**
   - `services/detection-engine/pom.xml`
   - `services/detection-engine/Dockerfile`
@@ -918,99 +929,85 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
   - `services/detection-engine/src/main/java/com/fraudengine/detection/domain/rules/`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/domain/assessment/`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/application/RuleEvaluator.java`
-  - `services/detection-engine/src/main/java/com/fraudengine/detection/application/AssessmentFactory.java`
+  - `services/detection-engine/src/main/java/com/fraudengine/detection/application/AssessmentAggregator.java`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/application/DeterministicIdFactory.java`
   - `services/detection-engine/src/test/java/com/fraudengine/detection/domain/rules/RuleEvaluatorTest.java`
-  - `services/detection-engine/src/test/java/com/fraudengine/detection/domain/rules/CompositeRuleTest.java`
-  - `services/detection-engine/src/test/java/com/fraudengine/detection/domain/assessment/AssessmentAggregationTest.java`
+  - `services/detection-engine/src/test/java/com/fraudengine/detection/domain/assessment/AssessmentAggregatorTest.java`
   - `services/detection-engine/src/test/java/com/fraudengine/detection/application/DeterministicIdFactoryTest.java`
+  - `services/fraud-control-service/src/main/java/com/fraudengine/control/domain/RuleDefinitionValidator.java`
+  - `services/fraud-control-service/src/test/java/com/fraudengine/control/domain/RuleDefinitionValidatorTest.java`
 - **Abordagem:**
-  1. Representar os nós da AST com tipos Java fechados e lógica de visitante/avaliador; o código de domínio recebe uma porta somente de leitura para fatos históricos.
-  2. Retornar um resultado individual com estado e evidência sanitizada para cada regra do snapshot capturado.
-  3. Aplicar KTD14 uma vez após todos os resultados das regras; construir alerta e solicitação de notificação somente para avaliações suspeitas.
-  4. Gerar IDs estáveis sem offsets Kafka para que a reexecução do mesmo evento online não crie uma nova identidade de negócio.
-  5. Manter serialização de transporte, repositórios de estado e APIs do broker fora dos pacotes de domínio.
-- **Padrões a seguir:** Serviços de domínio puros e determinísticos, valores imutáveis e portas para agregados históricos.
-- **Nota de execução:** Implementar cada regra primitiva e de agregação de forma orientada por testes; testes de propriedade nos limites são apropriados para valores/janelas se permanecerem legíveis.
+  1. Representar a AST com tipos Java fechados e permitir somente limite monetário, `COUNT` por janela e composição `ALL`/`ANY` no caminho obrigatório.
+  2. Receber fatos históricos por uma porta somente de leitura, sem API Kafka, serialização ou repositório dentro do domínio.
+  3. Produzir um resultado sanitizado por regra e agregar uma única vez conforme KTD14.
+  4. Criar alerta e solicitação de notificação somente para avaliação suspeita; derivar IDs sem offsets Kafka conforme KTD8.
+  5. Restringir no plano de controle a lista executável a `AMOUNT_THRESHOLD`, `COUNT_WINDOW`, `ALL` e `ANY`; uma regra de tipo apenas futuro não pode ser aprovada/publicada para este motor.
+- **Padrões a seguir:** Valores imutáveis, serviços de domínio determinísticos e testes baseados em comportamento público.
+- **Nota de execução:** Aplicar TDD em pequenas fatias. `DeterministicIdFactory` e `AssessmentAggregator` ficam reservadas para implementação integral pelo autor do case; a IA pode ajudar a definir o primeiro teste e revisar somente depois que o autor apresentar sua solução.
 - **Cenários de teste:**
-  - Abrange AE1. Uma transação válida com todas as regras em `NO_MATCH` produz `NOT_SUSPICIOUS` e nenhuma saída condicional.
-  - Um limite usa inteiros na menor unidade monetária sem arredondamento e rejeita agregação de moedas incompatíveis.
-  - Janelas de contagem e soma incluem o evento atual e excluem histórico posterior ao seu `occurredAt`.
-  - `ALL` exige que todos os filhos correspondam; `ANY` exige pelo menos um; a profundidade aninhada não pode contornar o limite configurado.
-  - Abrange AE2. Múltiplas correspondências produzem um alerta com todos os resultados e a maior severidade.
-  - Abrange AE9. Nenhuma correspondência e indisponibilidade do histórico necessário produzem `INCONCLUSIVE`; qualquer correspondência conclusiva ainda produz `SUSPICIOUS`.
-  - Reavaliar o mesmo evento online produz o mesmo ID de avaliação e, quando suspeito, os mesmos IDs de alerta e notificação; mudar posteriormente o canal escolhido pelo notificador não altera `notificationRequestId`, que deriva somente de `alertId`.
-  - Os espaços de nomes online e de backtest produzem identidades diferentes para o mesmo evento.
-  - Abrange AE10. A evidência e a notificação do cliente não contêm contato, expressão da regra, dados de conta/cartão nem payload bruto da transação.
-- **Verificação:** O conjunto completo de regras pode ser exercitado como testes unitários puros, cada resultado agregado obedece a KTD14 e os IDs de saída permanecem estáveis entre reavaliações.
+  - Abrange AE1. Valor abaixo do limite e contagem abaixo da janela produzem `NOT_SUSPICIOUS` sem saída condicional.
+  - Valor exatamente no limite respeita a comparação declarada e valores monetários permanecem inteiros na menor unidade.
+  - A regra `COUNT` inclui o evento corrente, considera somente fatos do mesmo cliente dentro da janela e retorna `NOT_EVALUATED` quando o histórico exigido não está disponível.
+  - `ALL` exige correspondência de todos os filhos e `ANY` exige ao menos uma, sem permitir profundidade além do limite validado.
+  - O plano de controle rejeita `SUM_WINDOW`, `ATTRIBUTE_COMPARISON` e qualquer tipo desconhecido antes de criar um snapshot que o motor não saiba executar.
+  - Abrange AE2. Duas regras correspondentes produzem um alerta consolidado com ambas e a maior severidade.
+  - Abrange AE9. Sem correspondência e com `NOT_EVALUATED`, a avaliação final é `INCONCLUSIVE`; qualquer `MATCHED` conclusivo prevalece como `SUSPICIOUS`.
+  - Reavaliar o mesmo evento produz os mesmos `assessmentId`, `alertId` e `notificationRequestId`; o último deriva somente de `alertId`.
+  - Abrange AE10. Evidências e solicitação externa não contêm contato, expressão da regra, conta, cartão nem payload bruto.
+- **Verificação:** Todos os cenários passam como testes unitários sem Docker; a implementação não importa APIs Kafka ou persistência nos pacotes de domínio.
 
-### U4. Topologia de detecção com estado no Kafka Streams
+### U4. Fatia vertical do motor no Kafka Streams
 
-- **Objetivo:** Conectar ingestão canônica, verificações de integridade, estado particionado por cliente, regras dinâmicas e saídas atômicas de avaliação em uma topologia recuperável.
-- **Requisitos:** R1-R5, R10-R27, R31-R33, R35; F1, F2, F3, F5, F6; AE1-AE4, AE6, AE8, AE9, AE13; KTD3, KTD6-KTD8, KTD10, KTD12-KTD14, KTD17.
+- **Prioridade:** Obrigatória.
+- **Objetivo:** Consumir transações e rulesets dinâmicos, manter o estado mínimo por cliente e publicar avaliações, alertas e solicitações de notificação de forma atômica.
+- **Requisitos:** R1-R5, R10-R17, R19-R23, R25, R31-R33, R35; F1-F6; AE1-AE4, AE6, AE8, AE9, AE13; KTD3, KTD6-KTD8, KTD10, KTD12-KTD14, KTD17.
 - **Dependências:** U1, U2, U3.
 - **Arquivos:**
   - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/DetectionTopology.java`
-  - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/TransactionTimestampExtractor.java`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/EventValidationProcessor.java`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/TransactionIdentityProcessor.java`
-  - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/EventIdentityProcessor.java`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/CustomerEvaluationProcessor.java`
-  - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/RuleSetStore.java`
-  - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/RuleSetBootstrapLoader.java`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/in/kafka/RuleSetUpdateProcessor.java`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/adapter/out/kafka/OutputRouter.java`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/config/KafkaStreamsConfiguration.java`
-  - `services/detection-engine/src/main/java/com/fraudengine/detection/config/DetectionProperties.java`
   - `services/detection-engine/src/main/java/com/fraudengine/detection/health/StreamsReadinessHealthIndicator.java`
   - `services/detection-engine/src/main/resources/application.yml`
   - `services/detection-engine/src/test/java/com/fraudengine/detection/adapter/in/kafka/DetectionTopologyTest.java`
-  - `services/detection-engine/src/test/java/com/fraudengine/detection/adapter/in/kafka/EventTimeTopologyTest.java`
   - `services/detection-engine/src/test/java/com/fraudengine/detection/adapter/in/kafka/RuleSetPropagationTest.java`
   - `services/detection-engine/src/test/java/com/fraudengine/detection/adapter/in/kafka/DetectionKafkaIntegrationTest.java`
-  - `services/detection-engine/src/test/java/com/fraudengine/detection/adapter/in/kafka/DetectionRecoveryIntegrationTest.java`
 - **Abordagem:**
-  1. Consumir bytes de forma defensiva para que uma falha de desserialização possa produzir uma referência inválida sanitizada sem prender a partição.
-  2. Validar a chave de entrada e o contrato antes de tocar nos repositórios de estado; verificar identidade da transação, reparticionar por `eventId` para deduplicação global e, depois, reparticionar registros aceitos por `customerId`.
-  3. Materializar repositórios persistentes nomeados para identidade da transação, impressões digitais dos eventos e histórico do cliente, com logs de alterações habilitados; registrar o tópico compactado de ruleset por `Topology.addGlobalStore`, com consumo em bytes e processador de atualização responsável pela única escrita no store replicado em cada instância.
-  4. Desabilitar o início automático da topologia; usar um consumidor Kafka independente, sem commits e com atribuição manual, para ler o tópico de regras até o end offset e exigir ao menos um snapshot `ACTIVE` válido e não vazio antes de chamar `KafkaStreams.start()`. A restauração subsequente do store global reaplica a validação e alcança atualizações concorrentes antes do processamento normal.
-  5. No processador do repositório global de cada instância, desserializar defensivamente, validar versão monotônica/hash/DSL, compilar uma representação imutável e substituir o snapshot completo somente depois do sucesso. O processador de cada transação captura uma única versão imutável e a registra na avaliação.
-  6. Avaliar cada evento aceito usando o histórico até `occurredAt`, atualizar o histórico na mesma transação Kafka e encaminhar saídas conforme KTD14.
-  7. Configurar EOS v2, leituras de dados confirmados, nomes explícitos de recursos internos e prontidão ligada ao estado do Streams e a um conjunto de regras válido.
-- **Padrões a seguir:** Kafka Streams Processor API para acesso ao repositório por intervalo de tempo; o avaliador de domínio permanece independente do broker.
-- **Nota de execução:** Construir a topologia por meio dos casos do `TopologyTestDriver` antes de iniciar testes de integração com o broker. Preservar um teste de recuperação falhando antes de ajustar o desempenho.
+  1. Validar schema, limites e chave antes de alterar qualquer store; registros inválidos geram apenas referência sanitizada.
+  2. Com a entrada chaveada por `transactionId`, detectar conflito de outro `eventId`; depois, executar um único reparticionamento por `customerId`.
+  3. Deduplicar `eventId` dentro do cliente e manter histórico temporal com changelog para a regra `COUNT` de 10 minutos.
+  4. Consumir `fraud.ruleset.active.v1` em um global store. Validar versão, hash, schema e DSL antes de trocar a referência imutável; manter o último snapshot válido diante de atualização inválida.
+  5. Exigir um ruleset válido na prontidão. No roteiro local, publicar e carregar o primeiro snapshot antes de produzir transações.
+  6. Avaliar com `occurredAt`, atualizar estado e rotear saídas conforme KTD14 sob `exactly_once_v2`; consumidores de evidência usam `read_committed`.
+  7. Expor saúde, métricas essenciais e logs correlacionados sem payload bruto ou identificadores pessoais como rótulos.
+- **Padrões a seguir:** Processor API para stores temporais; domínio da U3 permanece independente do broker.
+- **Nota de execução:** Usar TDD com `TopologyTestDriver` antes do teste com Kafka real. Não implementar o bootstrap independente, duas instâncias, deduplicação global entre clientes nem automação de reexecução da quarentena nesta unidade.
 - **Cenários de teste:**
-  - Abrange AE1. Um evento normal com chave produz exatamente uma avaliação confirmada e nenhum alerta/solicitação.
-  - Abrange AE2. Um evento suspeito publica atomicamente avaliação, alerta interno e solicitação de notificação com uma identidade de alerta compartilhada.
-  - Abrange AE3. O mesmo evento/chave/impressão digital recebido repetidamente dentro do horizonte online não produz nova saída nem alteração de estado depois da primeira confirmação.
-  - Uma reentrega sintética posterior ao horizonte online pode republicar os mesmos IDs determinísticos, mas o registro idempotente do notificador continua impedindo um segundo envio; replay deliberado antigo é recusado no fluxo online e usa namespace isolado.
-  - O mesmo `eventId` com impressão digital diferente do payload é colocado em quarentena em vez de ser tratado como duplicata.
-  - O mesmo `eventId` recebido sob chaves `transactionId` diferentes é detectado após o reparticionamento por identidade de evento e não pode criar uma segunda avaliação.
-  - Abrange AE4. O mesmo `transactionId` com outro `eventId` é colocado em quarentena e não altera o histórico do cliente.
-  - A referência de quarentena contém coordenadas, hashes e código do motivo, mas não o payload; o original recente pode ser localizado no tópico de entrada e não é republicado automaticamente.
-  - Schema inválido, payload grande demais, chave Kafka incorreta e timestamp futuro excessivo seguem para uma saída de falha sanitizada sem bloquear o próximo registro válido.
-  - Abrange AE6. Com o tópico de regras vazio ou sem snapshot válido, o bootstrap independente mantém a prontidão negativa e não chama `KafkaStreams.start()`; depois de encontrar um snapshot válido, a restauração global termina antes do processamento. A indisponibilidade posterior do plano de controle não interrompe a avaliação.
-  - Um registro de entrada publicado antes do primeiro conjunto de regras permanece não confirmado e é avaliado exatamente uma vez depois que a inicialização inicia a topologia.
-  - Um conjunto de regras vazio, com versão inferior, hash incorreto ou conteúdo inválido mantém o último conjunto válido carregado e incrementa uma métrica operacional de rejeição.
-  - Uma atualização publicada entre o fim da verificação independente e a restauração global também é consumida; nenhuma transação é avaliada antes de o store alcançar o end offset observado pelo mecanismo de restauração.
-  - Abrange AE13. Republicar a mesma versão com o mesmo hash não altera o snapshot carregado; a mesma versão com hash diferente é rejeitada e sinalizada.
-  - Uma avaliação iniciada antes da troca termina integralmente com `N-1`, enquanto a primeira avaliação iniciada depois usa integralmente `N`; nenhuma saída mistura resultados de duas versões.
-  - Abrange AE8. Um evento atrasado ainda retido é avaliado contra o histórico anterior, marcado como atrasado e influencia apenas avaliações posteriores.
-  - Abrange AE9. Um evento além da retenção histórica retorna `NOT_EVALUATED` para regras com estado afetadas e segue KTD14.
-  - Uma falha/reinício restaura os repositórios pelos logs de alterações e reprocessa a entrada não confirmada sem duplicar saídas de negócio.
-  - Um teste de integração com duas instâncias mostra que ambas recebem o snapshot global, podem convergir em instantes diferentes, registram uma versão completa por avaliação e finalmente expõem a mesma `loadedVersion`.
-- **Verificação:** A integração com Kafka real comprova saídas atômicas confirmadas, reinício/reexecução restaura o estado, dados inválidos não envenenam uma partição e a topologia permanece independente da disponibilidade do PostgreSQL.
+  - Abrange AE1. Evento normal produz uma avaliação `NOT_SUSPICIOUS` e nenhuma saída condicional.
+  - Abrange AE2. Evento suspeito publica avaliação, alerta consolidado e solicitação com o mesmo `alertId`.
+  - Abrange AE3. O mesmo evento, transação, cliente e impressão digital não produz novas saídas nem altera o histórico.
+  - Abrange AE4. O mesmo `transactionId` com outro `eventId` publica referência sanitizada de conflito, sem avaliação e sem alteração do histórico.
+  - Payload inválido ou chave incompatível publica referência inválida e não impede o próximo registro válido.
+  - Abrange AE6. Sem ruleset válido, a prontidão é negativa; depois do primeiro snapshot, o motor avalia sem consultar PostgreSQL e continua usando-o se o serviço de controle parar.
+  - Abrange AE13. Nova versão válida passa a ser usada integralmente por novas avaliações; versão inferior, hash conflitante ou DSL inválida mantém o último snapshot válido.
+  - Abrange AE8. Evento dentro do histórico usa apenas fatos até `occurredAt` e influencia avaliações posteriores.
+  - Abrange AE9. Para o MVP, histórico insuficiente significa `occurredAt < streamTime - retention`; esse caso produz `NOT_EVALUATED` para a regra stateful e segue KTD14. Store vazio dentro da retenção significa cliente sem fatos anteriores, não lacuna detectável de cold start.
+  - Teste com Kafka real confirma que `exactly_once_v2` está ativo, as saídas são visíveis com `read_committed` e o motor não possui conexão com PostgreSQL.
+- **Verificação:** Testes de topologia e uma integração Kafka real passam; o fluxo demonstra regra sem estado, regra stateful, atualização sem redeploy, idempotência do caso esperado e três contratos de saída.
 
-### U5. Entrega idempotente de notificações
+### U5. Notificação idempotente e fumaça ponta a ponta
 
-- **Objetivo:** Consumir solicitações de notificação sanitizadas, resolver dados fictícios de contato fora do motor e demonstrar entrega externa resiliente e observável.
-- **Requisitos:** R4-R6, R16, R18, R23, R24, R28, R29, R31, R32, R35; F2, F5; AE7, AE10, AE12; KTD15, KTD17, KTD18.
-- **Dependências:** U1, U4.
+- **Prioridade:** Obrigatória. Esta unidade absorve o objetivo essencial da antiga U7.
+- **Objetivo:** Demonstrar a integração externa com dados de contato fora do motor e comprovar o caminho completo por um teste de fumaça reproduzível.
+- **Requisitos:** R4-R6, R16, R18, R23, R24, R28, R31, R32, R35, R37; F2, F5; AE7, AE10, AE12; KTD15, KTD17, KTD18, KTD20.
+- **Dependências:** U1, U2, U4.
 - **Arquivos:**
   - `services/notification-service/pom.xml`
   - `services/notification-service/Dockerfile`
   - `services/notification-service/src/main/java/com/fraudengine/notification/NotificationApplication.java`
-  - `services/notification-service/src/main/java/com/fraudengine/notification/domain/`
   - `services/notification-service/src/main/java/com/fraudengine/notification/application/NotificationHandler.java`
   - `services/notification-service/src/main/java/com/fraudengine/notification/application/port/CustomerContactPort.java`
   - `services/notification-service/src/main/java/com/fraudengine/notification/application/port/NotificationChannelPort.java`
@@ -1022,194 +1019,113 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
   - `services/notification-service/src/main/resources/db/migration/`
   - `services/notification-service/src/test/java/com/fraudengine/notification/application/NotificationHandlerTest.java`
   - `services/notification-service/src/test/java/com/fraudengine/notification/adapter/in/kafka/NotificationConsumerIntegrationTest.java`
-  - `services/notification-service/src/test/java/com/fraudengine/notification/adapter/out/mail/MailpitReconciliationIntegrationTest.java`
+  - `scripts/smoke.sh`
 - **Abordagem:**
-  1. Persistir cada solicitação consumida como uma linha única `PENDING` na caixa de entrada/registro de entregas antes de confirmar seu offset Kafka.
-  2. Despachar linhas pendentes de forma independente com uma concessão temporária renovável, para que um processo que falhou não perca a solicitação e uma linha `SENDING` expirada possa ser retomada.
-  3. Manter o contato fictício do cliente em um schema/adaptador de banco separado, acessível apenas ao serviço de notificação.
-  4. Resolver o canal somente dentro do notificador, registrá-lo na entrega e em cada tentativa e aplicar limite configurável por referência opaca de cliente, categoria e canal antes do envio; persistir `SUPPRESSED` e publicar o resultado sem apagar o alerta interno.
-  5. Aplicar espera exponencial limitada e circuit breaker aos adaptadores de cadastro e canal sem afetar os alertas internos.
-  6. Usar `Message-ID` determinístico; reconciliar com Mailpit antes de uma nova tentativa após timeout/falha ambígua.
-  7. Publicar resultados de entrega sanitizados e encaminhar falhas esgotadas para a DLQ de notificação.
-- **Padrões a seguir:** Portas isolam provedores de cliente/cadastro e canal; o registro de entregas é a autoridade da idempotência dos efeitos locais.
-- **Nota de execução:** Implementar testes de concorrência do registro e de resultado ambíguo antes do caminho feliz de SMTP.
+  1. Persistir uma entrega com unicidade por `notificationRequestId`, `attempt_count` e `last_error_code`; obter um claim mínimo por transição condicional de `PENDING` ou `FAILED` para `SENDING` antes do SMTP.
+  2. Resolver o contato fictício apenas por uma porta do notificador e manter o contrato Kafka sanitizado.
+  3. Enviar ao Mailpit, persistir `SENT` ou `FAILED` e publicar `NotificationResult` sanitizado. Ao reprocessar uma linha `SENT`, republicar o mesmo resultado determinístico sem novo SMTP e só então confirmar o offset.
+  4. Fazer `scripts/smoke.sh` usar os tokens locais da U2, aprovar ou reutilizar um ruleset, produzir uma transação normal e uma suspeita e verificar avaliação, alerta, solicitação e e-mail.
+  5. Repetir a solicitação suspeita no teste e verificar uma linha de entrega e uma mensagem no Mailpit.
+- **Padrões a seguir:** Portas substituíveis para cadastro e canal; polling com prazo limitado no smoke, sem esperas fixas.
+- **Nota de execução:** Aplicar TDD no handler e no registro idempotente antes de conectar SMTP. Não implementar lease, supressão, circuit breaker, reconciliação de resultado SMTP ambíguo ou DLQ automática.
 - **Cenários de teste:**
-  - Uma solicitação suspeita válida resolve um contato fictício, envia um e-mail a partir de modelo e publica `SENT`.
-  - Resolver ou alterar o canal de entrega não muda `notificationRequestId`; uma nova entrega da mesma solicitação continua encontrando a mesma linha idempotente.
-  - Múltiplas entregas da mesma solicitação causam uma linha na caixa de entrada e uma mensagem externa.
-  - Duas instâncias de notificação disputando uma solicitação não conseguem enviar ambas.
-  - Várias solicitações do mesmo cliente/categoria/canal dentro da janela produzem todos os alertas internos, mas somente a quantidade externa permitida; as demais terminam como `SUPPRESSED`.
-  - Uma falha após a confirmação do registro de entregas, mas antes da confirmação Kafka, consome novamente a solicitação sem criar uma segunda tarefa pendente.
-  - Abrange AE7. Uma falha temporária do cadastro/canal repete dentro dos limites enquanto o alerta interno existente permanece disponível.
-  - Uma falha após a aceitação pelo Mailpit, mas antes de `SENT`, é reconciliada pelo `Message-ID` determinístico e não é enviada duas vezes.
-  - Uma falha permanente registra as tentativas, publica um resultado sanitizado e encaminha uma referência única para a DLQ.
-  - Abrange AE10. O contato aparece apenas na memória do notificador/Mailpit e nunca nas saídas Kafka, motivos do registro de entregas ou logs.
-  - Abrange AE12. Substituir o adaptador fictício por um simulador compatível com o contrato não exige alteração de regra ou topologia.
-- **Verificação:** Mailpit mostra uma mensagem por solicitação entre novas tentativas/reinícios, os resultados de notificação refletem o estado terminal e o contato sensível permanece confinado ao adaptador autorizado.
+  - Solicitação nova resolve contato fictício, envia um e-mail e publica `SENT`.
+  - Abrange AE7. Consumir novamente a mesma `notificationRequestId` reutiliza o registro `SENT` e não envia outro e-mail.
+  - Dois handlers concorrentes para a mesma solicitação produzem um único vencedor da transição para `SENDING`; o perdedor não chama SMTP.
+  - Falha do cadastro ou SMTP registra `FAILED` e não altera o alerta interno já publicado; uma nova tentativa com a mesma identidade não cria outra linha.
+  - Falha depois de persistir `SENT`, mas antes de confirmar o offset, republica o mesmo `NotificationResult` na reentrega sem enviar outro e-mail.
+  - Abrange AE10. Contato aparece somente no adaptador autorizado e no Mailpit, nunca no tópico de solicitação, resultado ou logs.
+  - Abrange AE12. Um adaptador compatível substitui cadastro ou canal sem mudar regras ou topologia.
+  - O smoke parte da stack limpa, ativa um ruleset, observa uma avaliação normal, um alerta suspeito e exatamente um e-mail.
+- **Verificação:** Testes unitários e de integração passam, e `scripts/smoke.sh` conclui o caminho da aprovação da regra até a mensagem visível no Mailpit.
 
-### U6. Fortalecimento de observabilidade e segurança
+### U6. Observabilidade concreta com Prometheus e Grafana
 
-- **Objetivo:** Tornar visíveis saúde dos serviços, SLO, acúmulo, propagação do conjunto de regras e controles de privacidade sem expor dados sensíveis ou de alta cardinalidade.
-- **Requisitos:** R26-R30, R33-R35, R37; F5, F7; AE6, AE10; KTD18, KTD19.
-- **Dependências:** U2, U4, U5.
+- **Prioridade:** Opcional - se der tempo. Não bloqueia a definição global de pronto.
+- **Objetivo:** Tornar o comportamento já implementado visível em um painel local sem ampliar a lógica de negócio.
+- **Requisitos:** R26-R29, R33, R37; F5, F7; AE6, AE10; KTD18, KTD19.
+- **Dependências:** U5.
 - **Arquivos:**
-  - `services/fraud-control-service/src/main/java/com/fraudengine/control/config/ObservabilityConfiguration.java`
-  - `services/detection-engine/src/main/java/com/fraudengine/detection/config/ObservabilityConfiguration.java`
-  - `services/notification-service/src/main/java/com/fraudengine/notification/config/ObservabilityConfiguration.java`
-  - `services/*/src/main/resources/logback-spring.xml`
+  - `services/*/src/main/resources/application.yml`
   - `infra/prometheus/prometheus.yml`
-  - `infra/prometheus/alerts.yml`
   - `infra/grafana/provisioning/`
   - `infra/grafana/dashboards/fraud-engine-overview.json`
   - `compose.yaml`
-  - `tools/system-tests/pyproject.toml`
-  - `tools/system-tests/requirements.txt`
-  - `tools/system-tests/src/fraud_system_tests/`
-  - `tools/system-tests/tests/test_data_minimization.py`
-  - `tools/system-tests/tests/test_authorization_boundaries.py`
-  - `tools/system-tests/tests/test_rule_abuse_limits.py`
-  - `tools/system-tests/tests/test_observability.py`
 - **Abordagem:**
-  1. Expor métricas dos serviços e do Kafka Streams pelo Actuator/Micrometer; definir rótulos limitados antes de criar o painel.
-  2. Propagar o contexto de rastreio nos cabeçalhos Kafka e registrar somente referências seguras de correlação e códigos de motivo.
-  3. Adicionar verificações de prontidão conforme as regras de responsabilidade em KTD19 e proteger endpoints de gerenciamento pela rede interna.
-  4. Provisionar um painel e regras de alerta acionáveis para SLO, atraso de consumo, restauração, `desiredVersion`, `publishedVersion`, `loadedVersion` por instância, idade/acúmulo da outbox, rejeições de snapshot, quarentena e saúde das notificações.
-  5. Examinar toda superfície secundária com marcadores sintéticos de CPF/e-mail/telefone e falhar testes diante de vazamento.
-  6. Acrescentar Prometheus, Grafana e Kafka UI ao perfil observável do Compose, com healthchecks e provisionamento montado a partir de `infra/`.
-  7. Criar nesta unidade a fundação pytest compartilhada dos testes de sistema, para que as verificações de segurança/observabilidade existam antes de U7 apenas acrescentar os cenários ponta a ponta.
-- **Padrões a seguir:** Métricas de baixa cardinalidade; diagnósticos sem payload; um vocabulário de correlação único entre contratos, logs e rastros.
+  1. Expor métricas Micrometer já necessárias ao caminho principal e coletá-las pelo Prometheus.
+  2. Provisionar um painel Grafana com vazão, latência de avaliação, atraso de consumo, estados finais, deduplicações/conflitos, `desiredVersion`/`publishedVersion`/`loadedVersion` e notificações.
+  3. Usar apenas rótulos de baixa cardinalidade; nenhuma métrica contém `customerId`, `transactionId`, `eventId`, e-mail ou payload.
+  4. Acrescentar Kafka UI para inspeção conveniente dos tópicos e incluir links e um roteiro curto da execução observada na documentação, sem introduzir tracing distribuído obrigatório.
+- **Padrões a seguir:** Painel provisionado como código e métricas agregadas acionáveis.
+- **Nota de execução:** Só iniciar depois que U5 e o smoke estiverem verdes. Se o tempo acabar, registrar U6 como não executada sem criar arquivos parciais.
 - **Cenários de teste:**
-  - Uma transação conhecida pode ser acompanhada da ingestão à notificação usando sua referência de rastreio/correlação.
-  - Kafka UI mostra eventos fictícios canônicos, enquanto Grafana mostra contagens agregadas e latência sem rótulos de transação/cliente.
-  - A prontidão do motor muda somente depois que Streams está em execução e um conjunto de regras válido foi carregado; a verificação de vida permanece independente.
-  - Rejeição de conjunto de regras, acúmulo da outbox, atraso do consumidor, restauração de estado e DLQ de notificação expõem, cada um, uma métrica e um sinal no painel.
-  - O painel diferencia snapshot desejado, publicação confirmada e versão carregada por instância sem usar identidades de autor/aprovador como rótulos.
-  - Abrange AE10. Marcadores sintéticos de CPF, e-mail, telefone e cartão não aparecem em saídas do motor, logs, rastros, métricas, auditoria ou tópicos de falha.
-  - Um operador mal-intencionado de regras não consegue promover expressões executáveis nem um conjunto de regras além dos limites de CPU/estado.
-  - Detalhes do Actuator e endpoints de auditoria não ficam disponíveis para um cliente público não autenticado.
-- **Verificação:** O painel explica uma execução saudável e uma degradada, os alertas possuem gatilhos mensuráveis e os testes de privacidade/segurança não encontram marcadores proibidos.
+  - Compose inicia Prometheus, Grafana e Kafka UI saudáveis e o Prometheus encontra os serviços.
+  - Uma transação normal e uma suspeita alteram as séries esperadas e aparecem no painel.
+  - O painel diferencia versão desejada, publicada e carregada quando os dados estiverem disponíveis.
+  - A inspeção das séries e do dashboard não encontra identificadores pessoais ou rótulos de alta cardinalidade.
+- **Verificação:** O painel provisionado explica uma execução saudável do smoke e seus números correspondem às métricas expostas pelos serviços.
 
-### U7. Evidências ponta a ponta, de resiliência e de fumaça
+### U8. Teste de carga e evidência das metas de capacidade
 
-- **Objetivo:** Comprovar a fatia vertical completa, a idempotência e a recuperação por cenários de caixa-preta que usam containers reais e fronteiras de processo.
-- **Requisitos:** R1-R6, R8-R12, R14-R25, R29, R31-R37; F1-F6; AE1-AE10, AE12-AE15; KTD8, KTD10, KTD11, KTD17, KTD18, KTD20.
-- **Dependências:** U2, U4, U5, U6.
+- **Prioridade:** Opcional - se der tempo. Não bloqueia a definição global de pronto.
+- **Objetivo:** Testar, e não presumir, se o ambiente local alcança 8.000 TPS sustentados, pico de 25.000 TPS e 99,9% das avaliações/alertas internos observados em até 500 ms.
+- **Requisitos:** R26, R27, R33, R35, R36, R37; AE11; KTD6, KTD12, KTD19, KTD20.
+- **Dependências:** U4; U6 é desejável, mas não obrigatória.
 - **Arquivos:**
-  - `tools/system-tests/src/fraud_system_tests/dev_auth.py`
-  - `tools/system-tests/tests/test_normal_transaction.py`
-  - `tools/system-tests/tests/test_suspicious_transaction.py`
-  - `tools/system-tests/tests/test_duplicate_and_conflict.py`
-  - `tools/system-tests/tests/test_rule_rollout.py`
-  - `tools/system-tests/tests/test_late_event.py`
-  - `tools/system-tests/tests/test_service_recovery.py`
-  - `tools/system-tests/tests/test_backtest_isolation_contract.py`
-  - `scripts/smoke.sh`
-  - `scripts/dev-bootstrap.sh`
-- **Abordagem:**
-  1. Fazer `scripts/dev-bootstrap.sh` gerar de forma idempotente um par RSA e tokens de curta duração para `rule-author` e `rule-approver` sob `.local/security/`, nunca versionados; montar somente a chave pública no serviço de controle e usar a privada apenas no emissor local. O README explicará os pré-requisitos e qualquer passo manual necessário será executado com orientação durante a unidade.
-  2. Inicializar `rule-author` com escrita e `rule-approver` com aprovação; criar uma versão pendente com o primeiro, aprová-la com o segundo e aguardar, em ordem, a versão desejada, publicada e carregada.
-  3. Produzir entradas de caixa-preta e consumir todas as saídas com isolamento de dados confirmados, em vez de inspecionar detalhes internos do Java.
-  4. Reiniciar serviços e interromper dependências em pontos definidos e, depois, reconciliar resultados pela identidade determinística.
-  5. Manter a verificação de fumaça rápida e determinística; manter experimentos destrutivos/de recuperação em um perfil explícito de testes de sistema.
-  6. Validar o contrato de backtest e o caminho de negação sem construir o pipeline completo de reprocessamento.
-  7. Marcar no pytest os cenários que exigem a stack como `system` e os destrutivos como `resilience`, preservando testes puros executáveis sem serviços externos.
-- **Padrões a seguir:** Os testes verificam contratos observáveis externamente e consultam repetidamente com prazos limitados, nunca com esperas fixas.
-- **Cenários de teste:**
-  - Abrange AE1 e AE2. Transações normais e suspeitas com múltiplas correspondências produzem seus conjuntos completos de saída esperados.
-  - Abrange AE3 e AE4. Entradas duplicadas e conflitantes preservam exatamente um efeito de negócio online e uma referência de conflito.
-  - A referência de conflito permite recuperar o registro original dentro da retenção, mas o procedimento operacional não o recoloca automaticamente no fluxo; uma origem já removida é relatada pelo runbook sem criar estado persistente adicional.
-  - Abrange AE5 e AE6. Separação entre autor/aprovador e comportamento do último conjunto válido conhecido sobrevivem à indisponibilidade do serviço de controle.
-  - Abrange AE14 e AE15. A retirada da última regra ativa é negada sem outbox; autoria, aprovação e auditoria observadas na API/banco correspondem aos `sub` dos dois tokens, e campos de identidade forjados são rejeitados.
-  - Abrange AE13. Aprovar retorna `202` e cria a outbox pendente; interromper e retomar o relay faz `publishedVersion` e `loadedVersion` convergirem sem segunda troca lógica no motor.
-  - Aprovar três snapshots enquanto Kafka está indisponível e recuperar o broker faz todas as versões convergirem na ordem, sem coalescimento; avaliações observadas identificam precisamente qual versão usaram.
-  - Abrange AE7. O reinício do notificador em torno de um envio ambíguo produz uma mensagem no Mailpit.
-  - Abrange AE8 e AE9. Eventos atrasados recuperáveis e antigos demais produzem os resultados temporais documentados.
-  - Abrange AE10. A inspeção do fluxo completo não encontra dados pessoais proibidos fora da fronteira do cadastro fictício/Mailpit.
-  - Parar e reiniciar o motor depois de uma entrada aceita; as saídas se recuperam sem perda ou duplicação.
-  - Parar Kafka temporariamente; os serviços expõem degradação e processam o acúmulo depois da recuperação sem fabricar resultados inconclusivos.
-  - O caminho local de backtest usa namespace próprio, não possui produtor para `fraud.notification.requested.v1` e não cria mensagem no Mailpit; em produção, a negação adicional por identidade, tópico e grupo é exercida pelo MSK IAM.
-  - Abrange AE12. Um consumidor interno alternativo e compatível lê alertas sem alterar a lógica do motor.
-- **Verificação:** Um comando documentado gera credenciais locais ignoradas pelo Git e executa o fluxo saudável de fumaça; uma suíte separada de resiliência registra recuperação, escoamento ordenado do acúmulo e contagens de efeitos para cada falha injetada.
-
-### U8. Geração de carga e evidências de capacidade
-
-- **Objetivo:** Gerar perfis reproduzíveis de tráfego médio, de pico e enviesado e relatar honestamente latência, vazão, atraso de consumo, uso de recursos e efeitos duplicados.
-- **Requisitos:** R26, R27, R33, R35, R36, R37; AE11; KTD12, KTD19, KTD20.
-- **Dependências:** U4, U6, U7.
-- **Arquivos:**
-  - `tools/load-generator/pyproject.toml`
-  - `tools/load-generator/requirements.txt`
-  - `tools/load-generator/src/fraud_load_generator/producer.py`
-  - `tools/load-generator/src/fraud_load_generator/result_consumer.py`
-  - `tools/load-generator/src/fraud_load_generator/profiles.py`
-  - `tools/load-generator/src/fraud_load_generator/report.py`
-  - `tools/load-generator/tests/test_profiles.py`
-  - `tools/load-generator/tests/test_latency_calculation.py`
-  - `tools/load-generator/tests/test_result_reconciliation.py`
+  - `tools/load-test/requirements.txt`
+  - `tools/load-test/load_test.py`
+  - `tools/load-test/test_load_test.py`
   - `docs/performance/benchmark-protocol.md`
-  - `docs/performance/results-template.md`
+  - `docs/performance/results.md`
 - **Abordagem:**
-  1. Usar um cliente Kafka de alta vazão com sementes determinísticas e perfis para tráfego sustentado, de pico, duplicado e com chave sobrecarregada.
-  2. Consumir avaliações com isolamento de dados confirmados e reconciliar IDs únicos enviados com saídas, alertas e solicitações de notificação.
-  3. Incluir `receivedAt` do motor em cada saída e medir o instante de observação dos dados confirmados menos esse timestamp como limite superior conservador para a visibilidade durável; relatar separadamente a latência do produtor ao consumidor.
-  4. Executar aquecimento, meta sustentada de 8.000 TPS, meta de pico de 25.000 TPS e cenários com clientes enviesados somente até onde a máquina local permitir.
-  5. Relatar ambiente, partições, threads de stream, conjunto de regras, composição dos eventos, duração, percentis, atraso de consumo, CPU/memória/tamanho do estado e limitações.
-- **Padrões a seguir:** Sementes fixas e resultados legíveis por máquina; nenhuma afirmação irrestrita de capacidade produtiva a partir de um notebook.
-- **Nota de execução:** Validar a reconciliação de resultados em taxa baixa antes de aumentar a vazão. O ajuste de desempenho segue as medições, não a intuição.
+  1. Usar um produtor/consumidor Kafka leve com semente fixa e dados únicos; evitar construir uma plataforma de carga própria.
+  2. Reconciliar eventos únicos enviados com avaliações e alertas lidos em `read_committed`.
+  3. Medir `readCommittedObservedAt - engineReceivedAt` como limite superior da publicação durável e relatar separadamente a latência desde o produtor.
+  4. Executar aquecimento, 8.000 TPS sustentados e 25.000 TPS de pico apenas enquanto a máquina permanecer estável.
+  5. Registrar hardware, containers, partições, threads, ruleset, duração, vazão alcançada, p50/p95/p99/p99.9/máximo, percentual em até 500 ms, atraso de consumo, perdas e duplicações.
+- **Padrões a seguir:** Semente fixa, relatório reproduzível e nenhuma extrapolação do notebook para produção.
+- **Nota de execução:** Só iniciar depois das unidades obrigatórias. Se a meta não for atingida, o resultado correto é um relatório honesto com gargalos e hipótese de escala horizontal, não ajuste de números nem afirmação de sucesso.
 - **Cenários de teste:**
-  - Uma semente fixa produz a mesma distribuição de eventos e clientes.
-  - O cálculo de percentis e do percentual abaixo de 500 ms corresponde a amostras sintéticas conhecidas.
-  - Um exemplo de leitura de dados confirmados comprova que o relógio do SLO começa no recebimento pelo motor, enquanto a latência de envio do produtor é relatada sob outro nome de métrica.
-  - Entradas duplicadas são excluídas das contagens de perdas únicas, mas incluídas nas métricas de deduplicação.
-  - Uma execução falha na verificação de integridade quando falta uma avaliação única ou uma saída de negócio é duplicada.
-  - O perfil de chave sobrecarregada concentra o percentual configurado em um cliente e expõe o atraso da partição afetada.
-  - Abrange AE11. Uma execução completa emite um relatório contendo todas as métricas exigidas e a impressão digital do ambiente/configuração.
-- **Verificação:** A ferramenta produz um relatório JSON/Markdown reproduzível, contabiliza cada entrada única aceita e distingue a vazão local alcançada da meta de produção.
+  - Cálculo de percentis e percentual em até 500 ms corresponde a amostras sintéticas conhecidas.
+  - Uma execução curta em taxa baixa reconcilia todas as entradas únicas antes de aumentar a carga.
+  - Falta de avaliação ou duplicação de efeito faz o teste de integridade falhar.
+  - Abrange AE11. A execução completa produz relatório com ambiente, configuração, vazão e distribuição de latência.
+- **Verificação:** `docs/performance/results.md` declara claramente se cada meta foi ou não alcançada e contém dados suficientes para repetir o ensaio.
 
-### U9. CI, arquitetura e documentação da entrega
+### U9. Documentação arquitetural, README e CI da entrega
 
-- **Objetivo:** Transformar a implementação e as evidências em uma entrega reproduzível do case, com decisões, diagramas, segurança, operação, limitações e uso transparente de IA.
-- **Requisitos:** R26-R38; F7; AE11, AE12; KTD16, KTD18-KTD21.
-- **Dependências:** U1-U8.
+- **Prioridade:** Obrigatória.
+- **Objetivo:** Transformar a fatia vertical verificada em uma entrega compreensível, reproduzível e honesta sobre o que foi implementado e o que pertence à arquitetura produtiva.
+- **Requisitos:** R26-R38; F7; AE10-AE12; KTD16, KTD18-KTD21.
+- **Dependências:** U1-U5. U6 e U8 são incorporadas apenas se tiverem sido concluídas e verificadas.
 - **Arquivos:**
   - `README.md`
   - `.github/workflows/ci.yml`
-  - `.github/dependabot.yml`
   - `docs/architecture/overview.md`
-  - `docs/architecture/contracts-and-topics.md`
-  - `docs/architecture/aws-production.md`
-  - `docs/decisions/decision-log.md`
-  - `docs/security/threat-model-and-lgpd.md`
   - `docs/testing/strategy.md`
   - `docs/testing/tdd-evidence.md`
-  - `docs/operations/runbook.md`
-  - `docs/operations/slo-and-capacity.md`
   - `docs/limitations-and-evolution.md`
   - `docs/ai-usage.md`
 - **Abordagem:**
-  1. Tornar o README o caminho mais curto entre um checkout limpo e um resultado ponta a ponta visível, cobrindo pré-requisitos, inicialização, roteiro da demonstração, testes, observabilidade, segurança, limitações e uso de IA.
-  2. Incluir no README um diagrama principal em Mermaid, legível sem ferramentas externas, mostrando produtor, Kafka, motor, controle de regras, PostgreSQL, notificador, Mailpit e observabilidade. Manter diagramas detalhados e o mapeamento AWS em `docs/architecture/`.
-  3. Copiar deste plano o desenho arquitetural de referência e atualizá-lo para corresponder aos nomes implementados e ao comportamento medido.
-  4. Registrar cada alternativa e trade-off adotado, incluindo detecção assíncrona, Kafka Streams, DSL segura, fronteiras do PostgreSQL, JSON Schema e ausência de modelo de leitura.
-  5. Documentar o modelo de ameaças e cada fronteira de segurança entre ingestão e alerta, separando controles locais executáveis dos controles de produção. Mapear cada cenário de abuso para ator, ativo, fronteira de confiança, controle responsável e evidência de verificação. Incluir a retenção operacional dos tópicos, a limitação de apagamento seletivo em log append-only e a estratégia produtiva de expiração/anonimização ou destruição da associação pseudônima conforme política institucional.
-  6. Publicar estratégia de testes, manual operacional, medição do SLO, método de capacidade, evidências de benchmark, limitações e evoluções.
-  7. Declarar onde a IA auxiliou ideação, pesquisa, planejamento, código, testes e documentação, além de como as saídas foram revisadas e verificadas pelo autor; nomear as duas classes implementadas integralmente pelo autor do case.
-  8. Executar verificações unitárias/de contrato/estáticas no CI normal; executar testes de integração com Docker em uma tarefa dedicada; manter carga e caos como artefatos manuais ou agendados.
-  9. Consolidar em `docs/testing/tdd-evidence.md` uma amostra legível dos ciclos vermelho-verde-refatoração por unidade, com comportamento, teste inicial, comando e resultado, sem transformar o documento em transcrição extensa de terminal.
-- **Padrões a seguir:** A documentação contém desenho e evidências pertinentes ao case, não preparação privada para entrevista nem afirmações sem comprovação.
-- **Nota de execução:** A documentação evolui com cada unidade, mas esta unidade realiza a verificação final de consistência e links quebrados depois que existirem evidências medidas.
+  1. Fazer do README o caminho curto entre checkout limpo, inicialização, smoke, inspeção das saídas por consumidor Kafka e Mailpit e execução dos testes; mencionar Kafka UI somente se U6 existir.
+  2. Incluir um diagrama Mermaid principal que distingue fluxo de dados e fluxo de controle e corresponde aos componentes realmente executáveis.
+  3. Criar `docs/architecture/overview.md` com objetivo e fronteira, arquitetura produtiva, MVP implementado, fluxo de regras, contratos/tópicos, idempotência, falhas, segurança/LGPD, escala, testes, trade-offs, limitações e evoluções.
+  4. Incluir uma matriz explícita `MVP executável x arquitetura de produção`, sem apresentar controle documentado como evidência implementada.
+  5. Explicar PostgreSQL versus MongoDB/DynamoDB, Kafka versus persistência síncrona das avaliações, detecção assíncrona versus motor bloqueador, Kafka Streams versus Flink/consumidor convencional e DSL segura versus Drools.
+  6. Documentar a estratégia de testes por camada, os cenários deliberadamente adiados e as evidências de TDD realmente observadas.
+  7. Declarar o uso de IA e nomear as duas classes implementadas integralmente pelo autor do case.
+  8. Configurar CI para schemas, compilação e testes unitários; executar integração com Docker apenas se permanecer estável no runner.
+- **Padrões a seguir:** Documentação da plataforma e do case, sem notas privadas de preparação para entrevista nem números não medidos.
+- **Nota de execução:** Escrever somente depois de verificar U5. Se U6 ou U8 não forem feitas, documentá-las como evolução/ensaio pendente e remover links ou screenshots inexistentes.
 - **Cenários de teste:**
-  - Uma pessoa sem contexto prévio segue o README e chega a uma avaliação normal, um alerta suspeito, uma mensagem no Mailpit e um painel no Grafana.
-  - O diagrama principal do README renderiza no GitHub, diferencia o fluxo de dados do fluxo de controle e corresponde aos containers e tópicos implementados.
-  - Todo comando documentado existe e usa arquivos do repositório em vez de caminhos locais absolutos.
-  - O CI executa etapas de schema, testes unitários, análise estática e integração com versões fixadas de Java/Python.
-  - Os diagramas de arquitetura nomeiam somente componentes e tópicos existentes ou claramente marcados como produção/futuro.
-  - O registro de decisões explica PostgreSQL em comparação com MongoDB/DynamoDB e log Kafka em comparação com persistência síncrona.
-  - O modelo de ameaças mapeia clientes Kafka comprometidos, operadores de regras mal-intencionados e exfiltração de cadastro/notificação para controles concretos e responsáveis pelos testes locais ou verificações de produção.
-  - A documentação de LGPD distingue retenção técnica local, política institucional produtiva e a limitação de eliminação seletiva no Kafka, sem afirmar conformidade apenas por configurar TTL.
-  - A declaração de IA identifica as duas classes autorais e a evidência de TDD mostra ao menos um ciclo verificável por unidade implementada.
-  - A documentação vincula cada simplificação a uma limitação, controle de produção ou evolução futura.
-- **Verificação:** Um ensaio a partir de checkout limpo tem sucesso, o CI está verde, a documentação corresponde às evidências de execução e nenhuma nota interna de preparação aparece no repositório oficial.
+  - Uma pessoa sem contexto segue o README e chega a uma avaliação normal, um alerta suspeito e uma mensagem no Mailpit.
+  - O diagrama principal renderiza no GitHub e diferencia claramente implementado, opcional concluído e produção.
+  - Todo comando e link local documentado existe e funciona a partir de checkout limpo.
+  - O CI executa schemas, compilação e testes unitários com Java fixado; qualquer integração opcional não torna a entrega instável.
+  - O documento de arquitetura cobre segurança ponta a ponta e LGPD, mas marca controles AWS/IAM/TLS/KMS como desenho produtivo.
+  - O registro de trade-offs e limitações corresponde ao código e não reivindica bootstrap bloqueante, múltiplas instâncias, reconciliação SMTP ou benchmark quando ausentes.
+  - A declaração de IA identifica as duas classes autorais e a evidência de TDD contém ao menos um ciclo verificável por unidade implementada.
+- **Verificação:** Ensaio a partir de checkout limpo, CI verde e revisão cruzada entre README, arquitetura, Compose, tópicos e serviços não encontram afirmação incompatível com a implementação.
 
 ---
 
@@ -1217,19 +1133,20 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
 
 | Etapa | Comando ou evidência | Abrange | Resultado exigido |
 |---|---|---|---|
-| Formatação e análise estática | `./mvnw spotless:check verify -DskipITs` | U1-U6 | Compilação em Java 21, testes unitários/de contrato e verificações estáticas passam. |
-| Integração Java | `./mvnw verify -Pintegration` | U2, U4, U5 | Testcontainers comprova PostgreSQL, EOS/recuperação do Kafka e reconciliação com Mailpit. |
-| Qualidade Python | `python -m pytest -m "not system and not resilience" tools/system-tests tools/load-generator/tests` e `python -m ruff check tools` | U7, U8 | Auxiliares puros e cálculos de carga passam sem serviços externos; testes marcados que exigem a stack executam nas etapas próprias. |
-| Validação do Compose | `docker compose config --quiet` | U1, U6 | A configuração resolve sem segredos versionados nem dependências inválidas. |
-| Verificação de fumaça | `./scripts/smoke.sh` | U2-U7 | O bootstrap gera material JWT local ignorado pelo Git; autoria/aprovação usam sujeitos distintos e uma aprovação com rollout do conjunto de regras, avaliação normal, alerta suspeito e um e-mail terminam com sucesso. |
-| Resiliência | perfil de resiliência dos testes de sistema | U4, U5, U7 | Reinício, escoamento do acúmulo, último conjunto válido conhecido e casos ambíguos de notificação preservam as contagens esperadas de efeitos. |
-| Segurança/privacidade | suítes de autorização, proveniência do `sub` e marcadores sintéticos | U2, U4-U7 | Identidades inválidas ou forjadas no corpo são negadas, sujeitos persistidos correspondem ao JWT validado e marcadores de dados proibidos não escapam de sua fronteira. |
-| Desempenho | gerador de carga e `docs/performance/benchmark-protocol.md` | U4, U6, U8 | O relatório separa a visibilidade desde o recebimento no motor até a leitura confirmada da latência entre produtor e consumidor, e inclui contagens de integridade, métricas de confirmação Kafka, atraso de consumo, recursos e ambiente. |
+| Build e testes obrigatórios | `./mvnw verify` | U1-U5 | Compilação em Java 21, schemas e testes unitários passam. |
+| Integrações obrigatórias locais | `./mvnw verify -Pintegration` | U2, U4, U5 | Testcontainers comprova PostgreSQL/outbox, Kafka Streams com EOS e a fronteira de entrega no Mailpit. |
+| Domínio do motor | testes do módulo `services/detection-engine` sem Docker | U3 | Regra monetária, contagem temporal, composição, agregação e IDs determinísticos passam. |
+| Integração Kafka | teste de integração do `detection-engine` | U4 | Ruleset dinâmico, estado por cliente, idempotência esperada e saídas `read_committed` passam com `exactly_once_v2`. |
+| Validação do Compose | `docker compose config --quiet` | U1-U6 | A configuração obrigatória resolve sem segredos versionados; serviços opcionais só são exigidos se a unidade correspondente foi executada. |
+| Verificação de fumaça | `./scripts/smoke.sh` | U2-U5 | Autoria/aprovação usam sujeitos distintos; uma avaliação normal, um alerta suspeito e exatamente um e-mail terminam com sucesso. |
+| Segurança/privacidade essencial | testes de autorização da U2, contratos e inspeção do smoke | U2-U5 | Identidades vêm do JWT, o motor não recebe contato e contratos/logs do caminho verificado não expõem os marcadores proibidos. |
+| Observabilidade opcional | painel provisionado e métricas do smoke | U6 | Prometheus coleta os serviços e o Grafana explica a execução sem rótulos de alta cardinalidade. |
+| Desempenho opcional | `tools/load-test/load_test.py` e `docs/performance/results.md` | U8 | O relatório reconcilia entradas/saídas e declara honestamente vazão e latência alcançadas para as metas testadas. |
 | Documentação | ensaio a partir de checkout limpo e revisão de links/comandos | U9 | README e arquitetura reproduzem o sistema verificado e declaram limitações e uso de IA. |
 
-O CI normal executa análises estáticas e testes de schema e unitários a cada alteração. A integração com Docker executa em uma tarefa de CI separada. As suítes de resiliência e carga são etapas manuais explícitas porque são mais longas e sensíveis ao ambiente. A prontidão da entrega exige a verificação de fumaça, segurança/privacidade e o ensaio a partir de checkout limpo, além do CI verde.
+O CI normal executa testes de schema, compilação e testes unitários. A integração com Docker pode executar em uma tarefa separada quando permanecer estável no runner. A prontidão da entrega exige build obrigatório, smoke, segurança/privacidade essencial e ensaio a partir de checkout limpo. U6 e U8 nunca bloqueiam esse conjunto.
 
-A evidência dos 500 ms usa `readCommittedObservedAt - engineReceivedAt`. A observação ocorre depois da confirmação; portanto, um valor dentro do limite comprova que a publicação durável ocorreu no máximo até esse limite superior. A latência/taxa de confirmação do Kafka Streams e o atraso de consulta do consumidor são relatados separadamente para diagnosticar violações; o tempo entre envio pelo produtor e observação nunca substitui o relógio do SLO. O relatório deve declarar se o ambiente local alcançou 8.000/25.000 TPS; raciocínio arquitetural de capacidade não substitui uma medição malsucedida, e sucesso no notebook não certifica produção.
+Se U8 for executada, a evidência dos 500 ms usa `readCommittedObservedAt - engineReceivedAt`. Como a observação ocorre depois da confirmação, um valor dentro do limite comprova que a publicação durável ocorreu no máximo até esse limite superior. O relatório deve declarar se o ambiente local alcançou 8.000/25.000 TPS; raciocínio arquitetural não substitui uma medição malsucedida, e sucesso no notebook não certifica produção.
 
 ---
 
@@ -1237,13 +1154,13 @@ A evidência dos 500 ms usa `readCommittedObservedAt - engineReceivedAt`. A obse
 
 ### Conclusão global
 
-- O fluxo local completo executa da transação canônica até a avaliação, o alerta interno e uma entrega reconciliada no Mailpit.
-- Cada evento aceito possui uma avaliação identificada deterministicamente; reentregas dentro do horizonte online não republicam saídas, e consumidores idempotentes protegem efeitos além desse horizonte.
+- O fluxo local completo executa da transação canônica até a avaliação, o alerta interno e uma entrega registrada no Mailpit.
+- Cada evento aceito possui uma avaliação identificada deterministicamente; uma reentrega com a mesma transação, cliente e impressão digital não republica saídas, e o notificador não repete uma entrega já concluída.
 - Regras podem ser criadas e aprovadas por outra pessoa sem nova implantação; sujeitos administrativos vêm do JWT, toda aprovação é validada antes da transição, o snapshot desejado nunca fica vazio, snapshot e outbox são criados atomicamente e o rollout publica todas as versões em ordem até convergir de forma observável.
-- Regras com estado, tempo do evento, duplicatas, conflitos, eventos atrasados, último conjunto válido conhecido e recuperação após reinício possuem evidências automatizadas.
-- O modelo de ameaças, os controles locais, o mapeamento de segurança na AWS e a minimização da LGPD são coerentes com os contratos implementados.
-- Painéis, logs, rastros, Kafka UI e Mailpit expõem as evidências operacionais pretendidas sem vazar dados proibidos.
-- O CI e o caminho de fumaça a partir de checkout limpo passam; relatórios de resiliência e desempenho registram resultados e limitações reais.
+- Uma regra sem estado, uma regra stateful de janela, composição, duplicatas esperadas, conflitos de transação e último ruleset válido conhecido possuem evidências automatizadas.
+- O documento de arquitetura distingue controles locais executados dos controles produtivos de segurança, LGPD, resiliência, escala e integração.
+- Prontidão, status do rollout, logs, consumidores Kafka e Mailpit expõem as evidências essenciais sem vazar dados proibidos; Kafka UI, Prometheus e Grafana só são exigidos se U6 foi executada.
+- O CI e o caminho de fumaça a partir de checkout limpo passam; benchmark só é citado como evidência se U8 foi executada.
 - O repositório documenta todas as decisões arquiteturais e trade-offs necessários para compreender a solução entregue, sem preparação privada para a apresentação.
 - A declaração de uso de IA nomeia as duas classes implementadas integralmente pelo autor, e a evidência de TDD registra ciclos verificáveis das unidades.
 - Arquivos experimentais, abordagens abandonadas, dependências não utilizadas, diagramas desatualizados e dados gerados em execução são removidos antes da entrega.
@@ -1254,10 +1171,11 @@ A evidência dos 500 ms usa `readCommittedObservedAt - engineReceivedAt`. A obse
 |---|---|
 | U1 | Build limpo, schemas válidos — incluindo snapshot não vazio e solicitação sem canal — e infraestrutura central saudável a partir de um checkout limpo. |
 | U2 | Ciclo de vida governado, sujeitos derivados do JWT, validação integral prévia, auditoria/outbox e publicação ordenada de todos os conjuntos de regras passam nos testes de concorrência e falha. |
-| U3 | A avaliação pura das regras abrange todas as primitivas, resultados de agregação e identidades determinísticas. |
-| U4 | A topologia Kafka comprova saídas EOS, recuperação do estado, semântica temporal, idempotência e isolamento de eventos problemáticos. |
-| U5 | Um efeito externo sobrevive a novas tentativas, concorrência e resultados ambíguos do Mailpit. |
-| U6 | Painéis de SLO/saúde e verificações de privacidade/segurança explicam execuções saudáveis e degradadas. |
-| U7 | Fluxos de caixa-preta de fumaça e resiliência abrangem os exemplos de aceite do case. |
-| U8 | O relatório reproduzível de carga contabiliza entradas/saídas e declara honestamente a capacidade medida. |
-| U9 | Documentação da entrega, CI, diagramas, registro de decisões e declaração de IA correspondem ao repositório verificado. |
+| U3 | A avaliação pura comprova limite monetário, contagem por janela, composição, agregação e identidades determinísticas. |
+| U4 | A topologia Kafka comprova ruleset dinâmico, estado mínimo por cliente, casos esperados de idempotência e saídas atômicas. |
+| U5 | O registro impede uma segunda entrega concluída e o smoke comprova o fluxo da regra ao Mailpit. |
+| U6 - opcional | Se iniciada, só conclui quando o painel provisionado corresponde às métricas reais e não contém dados pessoais. |
+| U8 - opcional | Se iniciada, só conclui quando o relatório contabiliza entradas/saídas e declara honestamente as metas atingidas ou não atingidas. |
+| U9 | README, arquitetura, testes, limitações, CI e declaração de IA correspondem ao repositório verificado. |
+
+U1-U5 e U9 formam a entrega obrigatória. U6 e U8 são bônus independentes e devem permanecer ausentes ou claramente incompletas se não houver tempo para satisfazer integralmente seus próprios critérios. A antiga U7 não é uma unidade pendente: seu smoke essencial foi absorvido por U5 e sua matriz avançada de resiliência foi adiada.
