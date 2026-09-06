@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: ${CONTROL_DB_URL:jdbc:postgresql://postgres:5432/fraud}
+    username: ${CONTROL_DB_USERNAME:fraud}
+    password: ${CONTROL_DB_PASSWORD:fraud}
+  flyway:
+    default-schema: rules
+    schemas: rules
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+control:
+  security:
+    issuer: ${CONTROL_JWT_ISSUER:fraud-local}
+    audience: ${CONTROL_JWT_AUDIENCE:fraud-control}
+    public-key-location: ${CONTROL_JWT_PUBLIC_KEY_LOCATION:file:.local/security/rule-control-public.pem}

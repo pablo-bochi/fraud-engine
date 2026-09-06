@@ -21,6 +21,7 @@
   <modules>
     <module>libs/contracts-java</module>
     <module>libs/test-support</module>
+    <module>services/fraud-control-service</module>
   </modules>
 
   <properties>
