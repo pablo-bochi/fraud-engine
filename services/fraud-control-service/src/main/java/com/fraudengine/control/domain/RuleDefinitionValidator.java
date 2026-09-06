@@ -4,10 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.Set;
 
 public final class RuleDefinitionValidator {
-  private static final Set<String> LEAF_TYPES =
-      Set.of("AMOUNT_THRESHOLD", "ATTRIBUTE_COMPARISON", "COUNT_WINDOW", "SUM_WINDOW");
+  private static final Set<String> LEAF_TYPES = Set.of("AMOUNT_THRESHOLD", "COUNT_WINDOW");
   private static final Set<String> COMPOSITE_TYPES = Set.of("ALL", "ANY");
-  private static final Set<String> ATTRIBUTE_OPERATORS = Set.of("EQ", "NEQ", "IN");
   private static final int MAXIMUM_COMPOSITE_CHILDREN = 20;
   private final int maximumDepth;
   private final int maximumWindowSeconds;
@@ -55,32 +53,20 @@ public final class RuleDefinitionValidator {
         throw new IllegalArgumentException("INVALID_AMOUNT_THRESHOLD");
       }
     }
-    if (type.equals("ATTRIBUTE_COMPARISON")) {
-      if (!node.path("attribute").isTextual()
-          || !node.path("attribute").asText().matches("[A-Za-z][A-Za-z0-9_.]{0,99}")
-          || !ATTRIBUTE_OPERATORS.contains(node.path("operator").asText())
-          || node.path("value").isMissingNode()
-          || node.path("value").isContainerNode()) {
-        throw new IllegalArgumentException("INVALID_ATTRIBUTE_COMPARISON");
-      }
-    }
-    if (type.equals("COUNT_WINDOW") || type.equals("SUM_WINDOW")) {
+
+    if (type.equals("COUNT_WINDOW")) {
       int seconds = node.path("windowSeconds").asInt(-1);
+
       if (seconds < 1) {
         throw new IllegalArgumentException("INVALID_WINDOW");
       }
+
       if (seconds > maximumWindowSeconds) {
         throw new IllegalArgumentException("WINDOW_EXCEEDS_LIMIT");
       }
-      if (type.equals("COUNT_WINDOW")
-          && (!node.path("minimumCount").canConvertToInt()
-              || node.path("minimumCount").asInt() < 1)) {
+
+      if (!node.path("minimumCount").canConvertToInt() || node.path("minimumCount").asInt() < 1) {
         throw new IllegalArgumentException("INVALID_COUNT_WINDOW");
-      }
-      if (type.equals("SUM_WINDOW")
-          && (!node.path("minimumAmountMinor").canConvertToLong()
-              || node.path("minimumAmountMinor").asLong() < 1)) {
-        throw new IllegalArgumentException("INVALID_SUM_WINDOW");
       }
     }
   }
