@@ -1,0 +1,1 @@
+{"schemaVersion":1,"assessmentId":"asm-01","eventId":"evt-01","transactionId":"txn-01","customerId":"cus-01","status":"NOT_SUSPICIOUS","finalSeverity":"NONE","ruleResults":[],"rulesetVersion":1,"receivedAt":"2026-09-05T12:30:00Z","evaluatedAt":"2026-09-05T12:30:00.010Z","late":false,"traceId":"trace-01"}
