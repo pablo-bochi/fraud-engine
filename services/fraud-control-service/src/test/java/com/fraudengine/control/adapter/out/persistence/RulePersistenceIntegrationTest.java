@@ -392,7 +392,7 @@ class RulePersistenceIntegrationTest {
         new ObjectMapper()
             .readTree(
                 """
-                {"type":"ATTRIBUTE_COMPARISON","attribute":"merchantCategory","operator":"EQ","value":"%s"}
+                {"type":"AMOUNT_THRESHOLD","amountMinor":1,"currency":"BRL","padding":"%s"}
                 """
                     .formatted("x".repeat(1_048_576)));
     var proposal =
