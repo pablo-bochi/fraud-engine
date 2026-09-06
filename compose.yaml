@@ -67,6 +67,27 @@ services:
       retries: 20
     networks: [backend, host-access]
 
+  fraud-control-service:
+    build:
+      context: .
+      dockerfile: services/fraud-control-service/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      CONTROL_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      CONTROL_DB_USERNAME: ${POSTGRES_USER}
+      CONTROL_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CONTROL_JWT_PUBLIC_KEY_LOCATION: file:/app/security/rule-control-public.pem
+    volumes:
+      - ./.local/security/rule-control-public.pem:/app/security/rule-control-public.pem:ro
+    ports:
+      - "127.0.0.1:${CONTROL_PORT}:8080"
+    networks: [backend, host-access]
+
 volumes:
   kafka-data:
   postgres-data:

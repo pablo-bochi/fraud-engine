@@ -428,7 +428,7 @@ sequenceDiagram
   V->>C: aprovar versão com JWT
   C->>C: autorizar e obter approver_subject do sub
   C->>D: bloquear head e ler o conjunto-base
-  C->>C: negar autoaprovação; montar e validar<br/>snapshot completo, não vazio e publicável
+  C->>C: negar autoaprovação e montar e validar<br/>snapshot completo, não vazio e publicável
   alt candidato válido
     C->>D: mesma transação: APPROVED + snapshot<br/>estado desejado + auditoria + outbox PENDING
     C-->>V: 202 Accepted<br/>desiredVersion=N, publicationStatus=PENDING

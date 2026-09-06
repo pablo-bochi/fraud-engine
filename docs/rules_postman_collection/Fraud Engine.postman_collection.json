@@ -1,0 +1,422 @@
+{
+  "info": {
+    "_postman_id": "a2a85da0-ed04-463e-a24e-dad6b5f28b4d",
+    "name": "Fraud Engine",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "10247430"
+  },
+  "item": [
+    {
+      "name": "Create rule",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{json_web_token_05fb}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ruleKey\": \"high-amount\",\n  \"name\": \"High amount\",\n  \"definition\": {\n    \"type\": \"AMOUNT_THRESHOLD\",\n    \"amountMinor\": 10000,\n    \"currency\": \"BRL\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rules",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rules"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Upsert rule",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{json_web_token_05fb}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"changeType\": \"UPSERT\",\n  \"definition\": {\n    \"type\": \"AMOUNT_THRESHOLD\",\n    \"amountMinor\": 25000,\n    \"currency\": \"BRL\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rules/:ruleId/versions",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rules",
+            ":ruleId",
+            "versions"
+          ],
+          "variable": [
+            {
+              "key": "ruleId",
+              "value": "23c74ba3-1b68-4ede-93b6-24449d7571f3"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Retire rule",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{json_web_token_05fb}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"changeType\": \"RETIRE\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rules/:ruleId/versions",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rules",
+            ":ruleId",
+            "versions"
+          ],
+          "variable": [
+            {
+              "key": "ruleId",
+              "value": "23c74ba3-1b68-4ede-93b6-24449d7571f3"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Approve rule",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{json_web_token_0us1}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"ruleKey\": \"high-amount\",\n  \"name\": \"High amount\",\n  \"definition\": {\n    \"type\": \"AMOUNT_THRESHOLD\",\n    \"amountMinor\": 10000,\n    \"currency\": \"BRL\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rules/:ruleId/versions/:ruleVersionId/approval",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rules",
+            ":ruleId",
+            "versions",
+            ":ruleVersionId",
+            "approval"
+          ],
+          "variable": [
+            {
+              "key": "ruleId",
+              "value": "23c74ba3-1b68-4ede-93b6-24449d7571f3"
+            },
+            {
+              "key": "ruleVersionId",
+              "value": "5fa399ba-bd39-40fc-a869-773cf73f1830"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List rule versions",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{supabase_service_role_api_key_05fb}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rules/:ruleId/versions",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rules",
+            ":ruleId",
+            "versions"
+          ],
+          "variable": [
+            {
+              "key": "ruleId",
+              "value": "23c74ba3-1b68-4ede-93b6-24449d7571f3"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List rules",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{supabase_service_role_api_key_05fb}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rules",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rules"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get active ruleset",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{supabase_service_role_api_key_05fb}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rulesets/active",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rulesets",
+            "active"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Get outbox",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{supabase_service_role_api_key_05fb}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rulesets/active/outbox",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rulesets",
+            "active",
+            "outbox"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Approve rule rejection",
+      "request": {
+        "auth": {
+          "type": "bearer"
+        },
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/v1/rules/:ruleId/versions/:ruleVersionId/rejection",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "rules",
+            ":ruleId",
+            "versions",
+            ":ruleVersionId",
+            "rejection"
+          ],
+          "variable": [
+            {
+              "key": "ruleId",
+              "value": ""
+            },
+            {
+              "key": "ruleVersionId",
+              "value": ""
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "List audit events",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{supabase_service_role_api_key_08eu}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8080/api/v1/audit-events",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8080",
+          "path": [
+            "api",
+            "v1",
+            "audit-events"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "json_web_token_05fb",
+      "secret": true
+    },
+    {
+      "key": "json_web_token_0us1",
+      "secret": true
+    },
+    {
+      "key": "supabase_service_role_api_key_05fb",
+      "secret": true
+    },
+    {
+      "key": "supabase_service_role_api_key_08eu",
+      "secret": true
+    }
+  ]
+}
