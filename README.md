@@ -135,7 +135,7 @@ docker compose --env-file .env.example config --quiet
 ./scripts/smoke.sh
 ```
 
-A finalidade de cada camada e o que ainda não é testado estão em [docs/testing/strategy.md](docs/testing/strategy.md). Os ciclos registrados durante as unidades estão em [docs/testing/tdd-evidence.md](docs/testing/tdd-evidence.md).
+A finalidade de cada camada e o que ainda não é testado estão em [docs/testing/strategy.md](docs/testing/strategy.md). Os ciclos registrados durante a implementação estão em [docs/testing/tdd-evidence.md](docs/testing/tdd-evidence.md).
 
 ## Contratos, tópicos e API
 
@@ -155,6 +155,6 @@ O inventário completo de tópicos, chaves e retenções está em [docs/architec
 
 ## Escopo honesto
 
-O MVP executa o núcleo local, incluindo a observabilidade de U6. Não executa benchmark/carga de U8, replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
+O MVP executa o núcleo local, incluindo a pilha de observabilidade com Prometheus, Grafana e Kafka UI. Não executa benchmark de vazão e latência, replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
 
 Veja [docs/limitations-and-evolution.md](docs/limitations-and-evolution.md) e [docs/ai-usage.md](docs/ai-usage.md).
