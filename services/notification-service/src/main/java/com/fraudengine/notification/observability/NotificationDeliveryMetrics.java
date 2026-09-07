@@ -2,10 +2,15 @@ package com.fraudengine.notification.observability;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 @Component
+@ConditionalOnProperty(
+    name = "notification.persistence.enabled",
+    havingValue = "true",
+    matchIfMissing = true)
 public final class NotificationDeliveryMetrics {
 
   public NotificationDeliveryMetrics(MeterRegistry registry, JdbcTemplate jdbc) {

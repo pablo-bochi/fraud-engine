@@ -56,6 +56,26 @@ Comandos de verificação executados nesta etapa:
 KAFKA_BOOTSTRAP_SERVERS=localhost:9094 ./mvnw -pl services/fraud-control-service -am verify -Pintegration
 ```
 
+## U3 — Núcleo determinístico de avaliação
+
+`DeterministicIdFactory` e `AssessmentAggregator` foram reservadas para implementação integral pelo autor do case. A sequência abaixo está preservada pelos testes e pelo registro da unidade; a implementação e os testes entraram juntos no commit da U3, portanto o Git final comprova cobertura e resultado verde, mas não substitui o relato contemporâneo do vermelho.
+
+| Comportamento | Vermelho observado | Verde observado |
+|---|---|---|
+| IDs são estáveis e separados por finalidade | as identidades determinísticas ainda não existiam | o mesmo input repete o UUID e namespaces diferentes não colidem |
+| ID vazio não é aceito | a fábrica ainda não impunha a pré-condição | `null`, vazio e whitespace geram `ID_MUST_NOT_BE_BLANK` |
+| Qualquer match torna a avaliação suspeita | agregador ainda não existia | `MATCHED` prevalece e preserva as regras acionadas |
+| Maior severidade vence | não havia ordenação explícita | `CRITICAL > HIGH > MEDIUM > LOW` |
+| Ausência de evidência vira inconclusiva | `NOT_EVALUATED` não tinha agregação formal | sem match e com `NOT_EVALUATED`, resultado é `INCONCLUSIVE` |
+| Todas sem match tornam avaliação normal | não havia tabela final | somente `NO_MATCH` produz `NOT_SUSPICIOUS` |
+| DSL avalia regras simples, stateful e compostas | avaliador ainda não existia | limites, janela, `ALL` e `ANY` passam com evidências explicáveis |
+
+Comando de verificação atual:
+
+```bash
+./mvnw -pl services/detection-engine -am test
+```
+
 ## U4 — Motor de deteccao com Kafka Streams
 
 | Comportamento | Vermelho observado | Verde observado |
@@ -114,3 +134,44 @@ Comandos de verificação executados nesta etapa:
 docker compose --env-file .env.example config --quiet
 ./scripts/smoke.sh
 ```
+
+## U6 — Observabilidade local opcional
+
+U6 acrescentou métricas, scrape, dashboard e Kafka UI, mas não preservou um ciclo vermelho-verde automatizado próprio no arquivo de evidências nem no commit. Para não fabricar um vermelho retroativo, a evidência disponível é classificada como verificação de configuração e execução observada:
+
+| Superfície | Evidência verificável |
+|---|---|
+| serviços | os três POMs incluem Micrometer Prometheus e expõem `/actuator/prometheus` |
+| ruleset | gauges distinguem versões desejada, publicada e carregada |
+| detecção | timer de avaliação e contadores por resultado/identidade não usam cliente como label |
+| notificação | gauge consulta entregas persistidas por status |
+| coleta | `infra/prometheus/prometheus.yml` faz scrape dos três serviços |
+| visualização | dashboard provisionado referencia métricas existentes; Kafka UI usa o broker interno |
+
+Comandos de verificação:
+
+```bash
+docker compose --env-file .env.example config --quiet
+KEEP_SMOKE_STACK=1 ./scripts/smoke.sh
+curl --fail http://localhost:9090/-/ready
+curl --fail http://localhost:3000/api/health
+curl --fail http://localhost:8083
+docker compose --project-name fraud-engine-smoke --env-file .env.example down -v --remove-orphans
+```
+
+Essa lacuna de registro TDD é uma limitação documental da unidade, não deve ser reescrita como um ciclo que não foi capturado.
+
+## U9 — Documentação da entrega e regressão revelada pela verificação
+
+O escopo planejado da U9 é documental. Durante a verificação completa, porém,
+`NotificationConsumerIntegrationTest` ficou vermelho porque o componente de métricas da U6 exigia
+`JdbcTemplate` num contexto in-memory configurado deliberadamente sem `DataSource`. A correção mínima
+condicionou `NotificationDeliveryMetrics` à mesma propriedade que habilita a persistência. O teste de
+integração voltou a ficar verde, e `NotificationDeliveryMetricsTest` registra os dois limites:
+componente e gauges presentes com persistência, ausentes no perfil in-memory. A suíte de integração
+completa, o smoke e a coleta real do Prometheus
+confirmaram o contexto normal.
+
+Para o restante documental, a prova substitutiva é a revisão cruzada entre documentação, código,
+schemas, Compose, migrations, scripts e histórico, seguida por validação de links/comandos e pelo
+smoke a partir de checkout limpo. A automação de CI foi removida do escopo por decisão explícita.
