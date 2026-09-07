@@ -23,6 +23,7 @@
     <module>libs/test-support</module>
     <module>services/fraud-control-service</module>
     <module>services/detection-engine</module>
+    <module>services/notification-service</module>
   </modules>
 
   <properties>

@@ -46,6 +46,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      CONTROL_DB_USER: ${CONTROL_DB_USER}
+      CONTROL_DB_PASSWORD: ${CONTROL_DB_PASSWORD}
+      NOTIFICATION_DB_USER: ${NOTIFICATION_DB_USER}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -53,6 +57,7 @@ services:
       retries: 20
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./infra/postgres/init-service-identities.sh:/docker-entrypoint-initdb.d/10-service-identities.sh:ro
     networks: [backend]
 
   mailpit:
@@ -78,8 +83,8 @@ services:
         condition: service_healthy
     environment:
       CONTROL_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      CONTROL_DB_USERNAME: ${POSTGRES_USER}
-      CONTROL_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      CONTROL_DB_USERNAME: ${CONTROL_DB_USER}
+      CONTROL_DB_PASSWORD: ${CONTROL_DB_PASSWORD}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       CONTROL_JWT_PUBLIC_KEY_LOCATION: file:/app/security/rule-control-public.pem
     volumes:
@@ -87,6 +92,47 @@ services:
     ports:
       - "127.0.0.1:${CONTROL_PORT}:8080"
     networks: [backend, host-access]
+
+  detection-engine:
+    build:
+      context: .
+      dockerfile: services/detection-engine/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DETECTION_KAFKA_APPLICATION_ID: fraud-detection-engine
+      DETECTION_PORT: 8081
+    ports:
+      - "127.0.0.1:${DETECTION_PORT}:8081"
+    networks: [backend, host-access]
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    environment:
+      NOTIFICATION_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      NOTIFICATION_DB_USERNAME: ${NOTIFICATION_DB_USER}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+      NOTIFICATION_FIXTURE_EMAIL: customer@example.test
+      NOTIFICATION_FROM_EMAIL: fraud-engine@example.test
+    networks: [backend]
 
 volumes:
   kafka-data:
