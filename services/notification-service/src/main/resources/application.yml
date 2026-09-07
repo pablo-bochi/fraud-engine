@@ -1,0 +1,48 @@
+spring:
+  datasource:
+    url: ${NOTIFICATION_DB_URL:jdbc:postgresql://postgres:5432/fraud_engine}
+    username: ${NOTIFICATION_DB_USERNAME:fraud_local}
+    password: ${NOTIFICATION_DB_PASSWORD:local-development-only}
+
+  flyway:
+    default-schema: notification
+    schemas: notification
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+
+    consumer:
+      group-id: ${NOTIFICATION_KAFKA_GROUP_ID:notification-service}
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      isolation-level: read_committed
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+    listener:
+      ack-mode: record
+
+  mail:
+    host: ${MAIL_HOST:mailpit}
+    port: ${MAIL_PORT:1025}
+
+notification:
+  persistence:
+    enabled: true
+
+  contact:
+    fixture:
+      enabled: true
+    fixture-email: ${NOTIFICATION_FIXTURE_EMAIL:customer@example.test}
+
+  mail:
+    enabled: true
+    from-address: ${NOTIFICATION_FROM_EMAIL:fraud-engine@example.test}
+
+  kafka:
+    request-topic: fraud.notification.requested.v1
+    result-topic: fraud.notification.result.v1
