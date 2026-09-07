@@ -175,7 +175,7 @@ Segurança antes de produção. A documentação descreve o desenho técnico e n
 
 O particionamento por cliente permite paralelismo por partição e mantém consulta de estado local. O tópico de entrada possui 12 partições no ambiente local; o teto real depende de distribuição de chaves, CPU, disco, tamanho dos stores, replicação e restauração. Chaves quentes podem exigir salting e agregação em dois estágios; esse desenho não está implementado.
 
-As metas do case de 8.000 TPS médios, 25.000 TPS de pico e geração de alertas em no máximo 500 ms após o recebimento do evento não foram medidas porque o ensaio dedicado de desempenho não foi executado. Nenhum número de capacidade deve ser inferido do smoke ou dos testes.
+As metas do case de 8.000 TPS médios, 25.000 TPS de pico e 99,9% das avaliações/alertas observados em até 500 ms foram medidas pela U8. Com uma thread do Kafka Streams e 4,12 GB atribuídos ao Docker, a carga sustentada observou 5.717,37 TPS e 100% das amostras em até 500 ms; o pico observou 5.749,18 TPS e 100%. Assim, a meta de latência foi atingida, mas as duas metas de vazão não foram. As 365.000 entradas dos dois cenários-alvo foram integralmente reconciliadas, sem perdas ou duplicações. O protocolo e os percentis completos estão em `docs/performance/`; esses números não certificam produção.
 
 A hipótese de dimensionamento é horizontal: cada partição é processada por uma tarefa ativa, e o
 paralelismo máximo de um consumer group fica limitado pelo número de partições. O dimensionamento
@@ -204,7 +204,7 @@ revistos.
 | observabilidade | Actuator, Prometheus, Grafana e Kafka UI | OTel/CloudWatch, alertas, SLOs e retenção |
 | quarentena | referência sanitizada | arquivo criptografado, acesso restrito e replay auditado |
 | replay/backtest | ausente | `runId`, intervalo delimitado e notificações bloqueadas |
-| capacidade | não medida | ensaios representativos antes de comprometer SLO |
+| capacidade | U8 local executada; latência atingida e vazões não atingidas no ambiente medido | ensaios representativos e dimensionamento horizontal antes de comprometer SLO |
 | entrega automatizada | fora do escopo atual | pipeline controlado com gates definidos pela organização |
 
 ## Trade-offs
