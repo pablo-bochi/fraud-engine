@@ -16,29 +16,22 @@ public final class MailpitEmailAdapter implements NotificationChannelPort {
   private final JavaMailSender mailSender;
   private final String fromAddress;
 
-  public MailpitEmailAdapter(
-      JavaMailSender mailSender,
-      String fromAddress) {
+  public MailpitEmailAdapter(JavaMailSender mailSender, String fromAddress) {
     this.mailSender = Objects.requireNonNull(mailSender);
     this.fromAddress = Objects.requireNonNull(fromAddress);
   }
 
   @Override
   public ChannelResult send(
-      CustomerNotificationRequested request,
-      CustomerContactPort.CustomerContact contact) {
+      CustomerNotificationRequested request, CustomerContactPort.CustomerContact contact) {
 
     try {
       MimeMessage message = mailSender.createMimeMessage();
 
       message.setFrom(fromAddress);
-      message.setRecipients(
-          Message.RecipientType.TO,
-          contact.email());
+      message.setRecipients(Message.RecipientType.TO, contact.email());
 
-      message.setSubject(
-          "Suspicious transaction detected",
-          StandardCharsets.UTF_8.name());
+      message.setSubject("Suspicious transaction detected", StandardCharsets.UTF_8.name());
 
       message.setText(
           """
@@ -50,19 +43,14 @@ public final class MailpitEmailAdapter implements NotificationChannelPort {
 
       message.saveChanges();
 
-      String providerReference =
-          canonicalMessageId(message.getMessageID());
+      String providerReference = canonicalMessageId(message.getMessageID());
 
       mailSender.send(message);
 
-      return new ChannelResult(
-          CHANNEL,
-          providerReference);
+      return new ChannelResult(CHANNEL, providerReference);
 
     } catch (Exception error) {
-      throw new IllegalStateException(
-          "EMAIL_DELIVERY_FAILED",
-          error);
+      throw new IllegalStateException("EMAIL_DELIVERY_FAILED", error);
     }
   }
 
@@ -73,13 +61,9 @@ public final class MailpitEmailAdapter implements NotificationChannelPort {
 
     String normalized = messageId.trim();
 
-    if (normalized.startsWith("<")
-        && normalized.endsWith(">")
-        && normalized.length() > 2) {
+    if (normalized.startsWith("<") && normalized.endsWith(">") && normalized.length() > 2) {
 
-      return normalized.substring(
-          1,
-          normalized.length() - 1);
+      return normalized.substring(1, normalized.length() - 1);
     }
 
     return normalized;

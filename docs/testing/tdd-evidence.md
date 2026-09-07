@@ -86,3 +86,31 @@ Comandos de verificacao executados nesta etapa:
 ./mvnw -pl services/detection-engine -am verify
 ./mvnw spotless:check
 ./mvnw clean verify
+
+```
+
+## U5 — Notificação idempotente e fumaça ponta a ponta
+
+| Comportamento | Vermelho observado | Verde observado |
+|---|---|---|
+| Nova solicitação envia uma única notificação | handler e portas ainda não existiam | contato é resolvido, canal é chamado uma vez e resultado `SENT` é produzido |
+| Solicitação já enviada é idempotente | replay ainda tentava passar pelo fluxo de entrega | `AlreadySent` reutiliza o resultado persistido sem resolver contato nem chamar SMTP |
+| Falha de canal é observável e repetível | persistência não suportava `FAILED` | falha registra código sanitizado e nova tentativa usa a mesma identidade com `attempt_count` incrementado |
+| Falha de cadastro não chama canal | resolução de contato não possuía caminho de falha | entrega termina em `FAILED` sem executar SMTP |
+| Claims concorrentes não duplicam envio | dois consumidores poderiam competir pela mesma solicitação | PostgreSQL concede um único `PENDING/FAILED -> SENDING`; o outro observa `InProgress` |
+| Consumo Kafka publica resultado | listener Kafka ainda não existia | request com chave canônica é consumido e `NotificationResult` é publicado |
+| Replay com infraestrutura real não duplica SMTP | idempotência estava coberta somente por doubles | Kafka, PostgreSQL e Mailpit confirmam dois resultados iguais, uma row e uma mensagem |
+| Falha após persistir `SENT` não exige novo SMTP | publisher estava acoplado diretamente ao consumer e a fronteira não era simulável | `NotificationResultPublisher` permite provar falha de publicação seguida de replay do mesmo `SENT` sem segunda entrega |
+| Falha do listener não é silenciosamente descartada | política padrão de recuperação do listener podia esgotar retries | `CommonContainerStoppingErrorHandler` interrompe o container para preservar replay do record |
+| Contrato de notificação é validado em runtime | Jackson permissivo aceitava campo extra `email` | JSON Schema Draft-07 rejeita contato, canal ou extensão não declarada antes da desserialização |
+| Contato permanece dentro do notifier | fronteira externa ainda não estava exercitada com SMTP real | fixture resolve o e-mail somente no adapter e Mailpit é a única superfície que o contém |
+| Smoke comprova a fatia vertical | não havia execução completa dos três serviços | regra aprovada produz assessment normal e suspeito, alerta, request, `SENT` e exatamente um e-mail mesmo após replay |
+
+Comandos de verificação executados nesta etapa:
+
+```bash
+./mvnw -pl services/notification-service -am test
+./mvnw -pl services/notification-service -am verify -Pintegration
+docker compose --env-file .env.example config --quiet
+./scripts/smoke.sh
+```

@@ -28,15 +28,15 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.builder.SpringApplicationBuilder;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
-import org.springframework.context.annotation.Profile;
-import org.springframework.context.annotation.Primary;
 
 @Testcontainers
 class NotificationConsumerIntegrationTest {
@@ -46,8 +46,7 @@ class NotificationConsumerIntegrationTest {
 
   private static final Instant NOW = Instant.parse("2026-09-06T18:00:00Z");
 
-  private static final ObjectMapper MAPPER =
-      new ObjectMapper().findAndRegisterModules();
+  private static final ObjectMapper MAPPER = new ObjectMapper().findAndRegisterModules();
 
   @Container
   static final KafkaContainer KAFKA =
@@ -61,8 +60,7 @@ class NotificationConsumerIntegrationTest {
 
     try (ConfigurableApplicationContext application =
         new SpringApplicationBuilder(
-                NotificationApplication.class,
-                NotificationTestConfiguration.class)
+                NotificationApplication.class, NotificationTestConfiguration.class)
             .run(
                 "--spring.profiles.active=notification-consumer-it",
                 "--notification.persistence.enabled=false",
@@ -75,14 +73,10 @@ class NotificationConsumerIntegrationTest {
                 "--spring.kafka.consumer.group-id=" + groupId,
                 "--spring.kafka.consumer.auto-offset-reset=earliest",
                 "--spring.kafka.consumer.enable-auto-commit=false",
-                "--spring.kafka.consumer.key-deserializer="
-                    + StringDeserializer.class.getName(),
-                "--spring.kafka.consumer.value-deserializer="
-                    + StringDeserializer.class.getName(),
-                "--spring.kafka.producer.key-serializer="
-                    + StringSerializer.class.getName(),
-                "--spring.kafka.producer.value-serializer="
-                    + StringSerializer.class.getName())) {
+                "--spring.kafka.consumer.key-deserializer=" + StringDeserializer.class.getName(),
+                "--spring.kafka.consumer.value-deserializer=" + StringDeserializer.class.getName(),
+                "--spring.kafka.producer.key-serializer=" + StringSerializer.class.getName(),
+                "--spring.kafka.producer.value-serializer=" + StringSerializer.class.getName())) {
 
       publishRequest(request());
 
@@ -101,9 +95,7 @@ class NotificationConsumerIntegrationTest {
 
   private static void createTopics() throws Exception {
     Properties properties = new Properties();
-    properties.put(
-        ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
-        KAFKA.getBootstrapServers());
+    properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
 
     try (AdminClient admin = AdminClient.create(properties)) {
       admin
@@ -116,19 +108,13 @@ class NotificationConsumerIntegrationTest {
     }
   }
 
-  private static void publishRequest(CustomerNotificationRequested request)
-      throws Exception {
+  private static void publishRequest(CustomerNotificationRequested request) throws Exception {
 
     Properties properties = new Properties();
-    properties.put(
-        ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
-        KAFKA.getBootstrapServers());
+    properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
 
     try (KafkaProducer<String, String> producer =
-        new KafkaProducer<>(
-            properties,
-            new StringSerializer(),
-            new StringSerializer())) {
+        new KafkaProducer<>(properties, new StringSerializer(), new StringSerializer())) {
 
       producer
           .send(
@@ -143,34 +129,22 @@ class NotificationConsumerIntegrationTest {
   private static NotificationResult readResult() throws Exception {
     Properties properties = new Properties();
 
-    properties.put(
-        ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
-        KAFKA.getBootstrapServers());
-    properties.put(
-        ConsumerConfig.GROUP_ID_CONFIG,
-        "result-reader-" + UUID.randomUUID());
-    properties.put(
-        ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
-        "earliest");
+    properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
+    properties.put(ConsumerConfig.GROUP_ID_CONFIG, "result-reader-" + UUID.randomUUID());
+    properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
     try (KafkaConsumer<String, String> consumer =
-        new KafkaConsumer<>(
-            properties,
-            new StringDeserializer(),
-            new StringDeserializer())) {
+        new KafkaConsumer<>(properties, new StringDeserializer(), new StringDeserializer())) {
 
       consumer.subscribe(List.of(RESULT_TOPIC));
 
-      long deadline =
-          System.nanoTime() + Duration.ofSeconds(10).toNanos();
+      long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
 
       while (System.nanoTime() < deadline) {
         for (var record : consumer.poll(Duration.ofMillis(250))) {
           assertThat(record.key()).isEqualTo("notification-123");
 
-          return MAPPER.readValue(
-              record.value(),
-              NotificationResult.class);
+          return MAPPER.readValue(record.value(), NotificationResult.class);
         }
       }
     }
@@ -201,9 +175,7 @@ class NotificationConsumerIntegrationTest {
       return new NotificationDeliveryPort() {
 
         @Override
-        public ClaimResult claim(
-            CustomerNotificationRequested request,
-            Instant claimedAt) {
+        public ClaimResult claim(CustomerNotificationRequested request, Instant claimedAt) {
           return new ClaimResult.Acquired(1);
         }
 
@@ -235,25 +207,20 @@ class NotificationConsumerIntegrationTest {
             String reasonCode,
             Instant failedAt) {
 
-          throw new AssertionError(
-              "markFailed must not be called in the Kafka happy path");
+          throw new AssertionError("markFailed must not be called in the Kafka happy path");
         }
       };
     }
 
     @Bean
     CustomerContactPort customerContactPort() {
-      return customerId ->
-          new CustomerContactPort.CustomerContact(
-              "customer-123@example.test");
+      return customerId -> new CustomerContactPort.CustomerContact("customer-123@example.test");
     }
 
     @Bean
     NotificationChannelPort notificationChannelPort() {
       return (request, contact) ->
-          new NotificationChannelPort.ChannelResult(
-              "EMAIL",
-              "mailpit-message-123");
+          new NotificationChannelPort.ChannelResult("EMAIL", "mailpit-message-123");
     }
 
     @Bean
@@ -261,6 +228,5 @@ class NotificationConsumerIntegrationTest {
     Clock fixedNotificationClock() {
       return Clock.fixed(NOW, ZoneOffset.UTC);
     }
-
   }
 }

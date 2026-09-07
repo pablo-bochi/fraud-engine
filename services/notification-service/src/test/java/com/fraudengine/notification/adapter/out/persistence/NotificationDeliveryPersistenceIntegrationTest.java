@@ -5,6 +5,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fraudengine.contracts.CustomerNotificationRequested;
 import com.fraudengine.notification.application.port.NotificationDeliveryPort.ClaimResult;
 import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,10 +18,6 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
 @Testcontainers
 class NotificationDeliveryPersistenceIntegrationTest {
@@ -133,12 +133,7 @@ class NotificationDeliveryPersistenceIntegrationTest {
     Instant failedAt = CLAIMED_AT.plusSeconds(5);
 
     var failedResult =
-        repository.markFailed(
-            request,
-            "EMAIL",
-            1,
-            "CHANNEL_DELIVERY_FAILED",
-            failedAt);
+        repository.markFailed(request, "EMAIL", 1, "CHANNEL_DELIVERY_FAILED", failedAt);
 
     assertThat(failedResult.status()).isEqualTo("FAILED");
     assertThat(failedResult.attemptCount()).isEqualTo(1);
@@ -213,13 +208,7 @@ class NotificationDeliveryPersistenceIntegrationTest {
 
     Instant sentAt = CLAIMED_AT.plusSeconds(15);
 
-    var sentResult =
-        repository.markSent(
-            request,
-            "EMAIL",
-            "mailpit-message-123",
-            2,
-            sentAt);
+    var sentResult = repository.markSent(request, "EMAIL", "mailpit-message-123", 2, sentAt);
 
     assertThat(sentResult.status()).isEqualTo("SENT");
     assertThat(sentResult.attemptCount()).isEqualTo(2);
@@ -282,9 +271,7 @@ class NotificationDeliveryPersistenceIntegrationTest {
       start.countDown();
 
       List<ClaimResult> results =
-          List.of(
-              first.get(10, TimeUnit.SECONDS),
-              second.get(10, TimeUnit.SECONDS));
+          List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
 
       assertThat(results)
           .filteredOn(result -> result instanceof ClaimResult.Acquired)
@@ -293,9 +280,7 @@ class NotificationDeliveryPersistenceIntegrationTest {
               ClaimResult.Acquired.class,
               acquired -> assertThat(acquired.attemptCount()).isEqualTo(1));
 
-      assertThat(results)
-          .filteredOn(result -> result instanceof ClaimResult.InProgress)
-          .hasSize(1);
+      assertThat(results).filteredOn(result -> result instanceof ClaimResult.InProgress).hasSize(1);
 
       assertThat(
               jdbc.queryForObject(

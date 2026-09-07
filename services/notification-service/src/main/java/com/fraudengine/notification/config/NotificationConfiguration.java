@@ -14,6 +14,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.kafka.listener.CommonContainerStoppingErrorHandler;
 import org.springframework.mail.javamail.JavaMailSender;
 
 @Configuration(proxyBeanMethods = false)
@@ -26,6 +27,7 @@ public class NotificationConfiguration {
       havingValue = "true",
       matchIfMissing = true)
   NotificationDeliveryPort notificationDeliveryPort(JdbcTemplate jdbc) {
+
     return new JdbcNotificationDeliveryAdapter(jdbc);
   }
 
@@ -36,8 +38,7 @@ public class NotificationConfiguration {
       havingValue = "true",
       matchIfMissing = true)
   CustomerContactPort fixtureCustomerContactPort(
-      @Value("${notification.contact.fixture-email:customer@example.test}")
-          String fixtureEmail) {
+      @Value("${notification.contact.fixture-email:customer@example.test}") String fixtureEmail) {
 
     return new FixtureCustomerContactAdapter(fixtureEmail);
   }
@@ -50,12 +51,9 @@ public class NotificationConfiguration {
       matchIfMissing = true)
   NotificationChannelPort mailpitNotificationChannelPort(
       JavaMailSender mailSender,
-      @Value("${notification.mail.from-address:fraud-engine@example.test}")
-          String fromAddress) {
+      @Value("${notification.mail.from-address:fraud-engine@example.test}") String fromAddress) {
 
-    return new MailpitEmailAdapter(
-        mailSender,
-        fromAddress);
+    return new MailpitEmailAdapter(mailSender, fromAddress);
   }
 
   @Bean
@@ -73,9 +71,12 @@ public class NotificationConfiguration {
       Clock clock) {
 
     return new NotificationHandler(
-        deliveryPort,
-        customerContactPort,
-        notificationChannelPort,
-        clock);
+        deliveryPort, customerContactPort, notificationChannelPort, clock);
+  }
+
+  @Bean
+  CommonContainerStoppingErrorHandler notificationKafkaErrorHandler() {
+
+    return new CommonContainerStoppingErrorHandler();
   }
 }

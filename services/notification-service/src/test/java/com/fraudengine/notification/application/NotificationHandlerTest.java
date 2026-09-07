@@ -1,6 +1,7 @@
 package com.fraudengine.notification.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fraudengine.contracts.CustomerNotificationRequested;
 import com.fraudengine.contracts.NotificationResult;
@@ -12,7 +13,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class NotificationHandlerTest {
 
@@ -100,7 +100,8 @@ class NotificationHandlerTest {
               String providerReference,
               int attemptCount,
               Instant sentAt) {
-            throw new AssertionError("markSent must not be called for an already sent notification");
+            throw new AssertionError(
+                "markSent must not be called for an already sent notification");
           }
 
           @Override
@@ -110,7 +111,8 @@ class NotificationHandlerTest {
               int attemptCount,
               String reasonCode,
               Instant failedAt) {
-            throw new AssertionError("markFailed must not be called for an already sent notification");
+            throw new AssertionError(
+                "markFailed must not be called for an already sent notification");
           }
         };
 
@@ -223,8 +225,7 @@ class NotificationHandlerTest {
             throw new IllegalStateException("smtp unavailable");
           }
 
-          return new NotificationChannelPort.ChannelResult(
-              "EMAIL", "mailpit-message-after-retry");
+          return new NotificationChannelPort.ChannelResult("EMAIL", "mailpit-message-after-retry");
         };
 
     var handler =

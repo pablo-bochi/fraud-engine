@@ -344,8 +344,8 @@ public final class DetectionTopology {
         alert.alertId(),
         alert.customerId(),
         alert.transactionId(),
-        "FRAUD_SUSPECTED",
-        "fraud-suspected-v1",
+        "SUSPICIOUS_TRANSACTION",
+        "suspicious-transaction-v1",
         "pt-BR",
         alert.createdAt(),
         alert.traceId());

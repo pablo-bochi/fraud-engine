@@ -62,11 +62,7 @@ public final class NotificationHandler {
       contact = customerContactPort.findByCustomerId(request.customerId());
     } catch (RuntimeException exception) {
       return deliveryPort.markFailed(
-          request,
-          EMAIL_CHANNEL,
-          acquired.attemptCount(),
-          CONTACT_RESOLUTION_FAILED,
-          now);
+          request, EMAIL_CHANNEL, acquired.attemptCount(), CONTACT_RESOLUTION_FAILED, now);
     }
 
     try {
@@ -80,11 +76,7 @@ public final class NotificationHandler {
           now);
     } catch (RuntimeException exception) {
       return deliveryPort.markFailed(
-          request,
-          EMAIL_CHANNEL,
-          acquired.attemptCount(),
-          CHANNEL_DELIVERY_FAILED,
-          now);
+          request, EMAIL_CHANNEL, acquired.attemptCount(), CHANNEL_DELIVERY_FAILED, now);
     }
   }
 }

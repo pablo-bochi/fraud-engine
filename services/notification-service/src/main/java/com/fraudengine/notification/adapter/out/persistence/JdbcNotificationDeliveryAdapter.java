@@ -22,8 +22,7 @@ public final class JdbcNotificationDeliveryAdapter implements NotificationDelive
     var dataSource =
         Objects.requireNonNull(jdbc.getDataSource(), "JdbcTemplate must have a DataSource");
 
-    this.transactions =
-        new TransactionTemplate(new DataSourceTransactionManager(dataSource));
+    this.transactions = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
   }
 
   @Override
@@ -95,8 +94,7 @@ public final class JdbcNotificationDeliveryAdapter implements NotificationDelive
                         updated_at,
                         trace_id
                       """,
-                      (resultSet, rowNum) ->
-                          notificationResult(request.schemaVersion(), resultSet),
+                      (resultSet, rowNum) -> notificationResult(request.schemaVersion(), resultSet),
                       channel,
                       providerReference,
                       Timestamp.from(sentAt),
@@ -147,8 +145,7 @@ public final class JdbcNotificationDeliveryAdapter implements NotificationDelive
                         updated_at,
                         trace_id
                       """,
-                      (resultSet, rowNum) ->
-                          notificationResult(request.schemaVersion(), resultSet),
+                      (resultSet, rowNum) -> notificationResult(request.schemaVersion(), resultSet),
                       channel,
                       reasonCode,
                       Timestamp.from(failedAt),
@@ -248,8 +245,8 @@ public final class JdbcNotificationDeliveryAdapter implements NotificationDelive
     throw new IllegalStateException("UNEXPECTED_DELIVERY_STATUS: " + delivery.status());
   }
 
-  private NotificationResult notificationResult(
-      int schemaVersion, java.sql.ResultSet resultSet) throws java.sql.SQLException {
+  private NotificationResult notificationResult(int schemaVersion, java.sql.ResultSet resultSet)
+      throws java.sql.SQLException {
     return new NotificationResult(
         schemaVersion,
         resultSet.getString("notification_request_id"),

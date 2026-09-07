@@ -30,6 +30,21 @@ cleanup() {
 
 fail() {
   echo "SMOKE FAILED: $1" >&2
+
+  echo >&2
+  echo "==> notification-service logs" >&2
+  compose logs --no-color --tail=120 notification-service >&2 || true
+
+  echo >&2
+  echo "==> notification delivery rows" >&2
+  compose exec -T postgres \
+    psql \
+      -U "$POSTGRES_USER" \
+      -d "$POSTGRES_DB" \
+      -c "SELECT notification_request_id, status, attempt_count, last_error_code
+          FROM notification.delivery;" \
+    >&2 || true
+
   exit 1
 }
 
