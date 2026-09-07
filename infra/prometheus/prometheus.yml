@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: fraud-control-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - fraud-control-service:8080
+
+  - job_name: detection-engine
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - detection-engine:8081
+
+  - job_name: notification-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - notification-service:8082

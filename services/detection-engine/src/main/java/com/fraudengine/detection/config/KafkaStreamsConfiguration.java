@@ -2,6 +2,8 @@ package com.fraudengine.detection.config;
 
 import com.fraudengine.detection.adapter.in.kafka.DetectionTopology;
 import com.fraudengine.detection.health.StreamsReadinessHealthIndicator;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.kafka.KafkaStreamsMetrics;
 import java.util.Properties;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.Serdes;
@@ -32,17 +34,26 @@ public class KafkaStreamsConfiguration {
   }
 
   @Bean
-  DetectionTopology detectionTopology(StreamsReadinessHealthIndicator readiness) {
-    return new DetectionTopology(readiness);
+  DetectionTopology detectionTopology(
+      StreamsReadinessHealthIndicator readiness, MeterRegistry meterRegistry) {
+
+    return new DetectionTopology(readiness, meterRegistry);
   }
 
   @Bean(initMethod = "start", destroyMethod = "close")
   KafkaStreams kafkaStreams(
       DetectionTopology topology,
       @Value("${spring.kafka.bootstrap-servers:localhost:9094}") String bootstrapServers,
-      @Value("${detection.kafka.application-id:fraud-detection-engine}") String applicationId) {
+      @Value("${detection.kafka.application-id:fraud-detection-engine}") String applicationId,
+      MeterRegistry meterRegistry) {
+
     Properties properties = properties(bootstrapServers);
     properties.put(StreamsConfig.APPLICATION_ID_CONFIG, applicationId);
-    return new KafkaStreams(topology.build(), properties);
+
+    KafkaStreams streams = new KafkaStreams(topology.build(), properties);
+
+    new KafkaStreamsMetrics(streams).bindTo(meterRegistry);
+
+    return streams;
   }
 }

@@ -9,6 +9,10 @@ import com.fraudengine.contracts.TransactionAssessment;
 import com.fraudengine.contracts.TransactionEvent;
 import com.fraudengine.detection.application.DeterministicIdFactory;
 import com.fraudengine.detection.health.StreamsReadinessHealthIndicator;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.kafka.common.serialization.Serdes;
@@ -41,12 +45,38 @@ public final class DetectionTopology {
   private final StreamsReadinessHealthIndicator readiness;
   private final DeterministicIdFactory idFactory = new DeterministicIdFactory();
 
+  private final MeterRegistry meterRegistry;
+  private final Timer evaluationTimer;
+
   public DetectionTopology() {
-    this(new StreamsReadinessHealthIndicator());
+    this(new StreamsReadinessHealthIndicator(), null);
   }
 
   public DetectionTopology(StreamsReadinessHealthIndicator readiness) {
+    this(readiness, null);
+  }
+
+  public DetectionTopology(StreamsReadinessHealthIndicator readiness, MeterRegistry meterRegistry) {
+
     this.readiness = readiness;
+    this.meterRegistry = meterRegistry;
+
+    if (meterRegistry != null) {
+      this.evaluationTimer =
+          Timer.builder("fraud.evaluation")
+              .description("Fraud evaluation latency")
+              .publishPercentileHistogram()
+              .register(meterRegistry);
+
+      Gauge.builder(
+              "fraud.ruleset.loaded.version",
+              readiness,
+              StreamsReadinessHealthIndicator::loadedVersion)
+          .description("Latest ruleset version loaded by the detection engine")
+          .register(meterRegistry);
+    } else {
+      this.evaluationTimer = null;
+    }
   }
 
   public Topology build() {
@@ -98,6 +128,13 @@ public final class DetectionTopology {
             .mapValues(ValidationResult::event)
             .transformValues(() -> new IdentityTransformer(), TRANSACTION_IDENTITIES);
 
+    identified.peek(
+        (key, result) -> {
+          if (result.conflict()) {
+            recordIdentityEvent("transaction_conflict");
+          }
+        });
+
     identified
         .filter((key, result) -> result.conflict())
         .mapValues(result -> quarantined(result.event()))
@@ -112,6 +149,15 @@ public final class DetectionTopology {
             .mapValues(IdentityResult::event)
             .transformValues(() -> new DeduplicationTransformer(), CUSTOMER_DEDUPLICATION);
 
+    deduplicated.peek(
+        (customerId, result) -> {
+          if (result.duplicate()) {
+            recordIdentityEvent("duplicate");
+          } else if (result.conflict()) {
+            recordIdentityEvent("event_conflict");
+          }
+        });
+
     deduplicated
         .filter((customerId, result) -> result.conflict())
         .selectKey((customerId, result) -> result.event().transactionId())
@@ -125,7 +171,10 @@ public final class DetectionTopology {
             .filter((customerId, result) -> !result.duplicate() && !result.conflict())
             .mapValues(DeduplicationResult::event)
             .transformValues(
-                () -> new CustomerEvaluationTransformer(activeRuleset), CUSTOMER_HISTORY);
+                () -> new CustomerEvaluationTransformer(activeRuleset, evaluationTimer),
+                CUSTOMER_HISTORY);
+
+    assessments.peek((customerId, assessment) -> recordAssessment(assessment.status()));
 
     assessments
         .selectKey((customerId, assessment) -> assessment.transactionId())
@@ -349,5 +398,29 @@ public final class DetectionTopology {
         "pt-BR",
         alert.createdAt(),
         alert.traceId());
+  }
+
+  private void recordAssessment(String status) {
+    if (meterRegistry == null) {
+      return;
+    }
+
+    Counter.builder("fraud.assessments")
+        .description("Fraud assessments produced by final status")
+        .tag("status", status)
+        .register(meterRegistry)
+        .increment();
+  }
+
+  private void recordIdentityEvent(String outcome) {
+    if (meterRegistry == null) {
+      return;
+    }
+
+    Counter.builder("fraud.identity.events")
+        .description("Deduplications and identity conflicts")
+        .tag("outcome", outcome)
+        .register(meterRegistry)
+        .increment();
   }
 }

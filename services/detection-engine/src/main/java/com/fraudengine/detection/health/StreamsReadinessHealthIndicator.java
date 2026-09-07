@@ -18,4 +18,8 @@ public final class StreamsReadinessHealthIndicator implements HealthIndicator {
         ? Health.up().withDetail("loadedVersion", version).build()
         : Health.down().withDetail("reason", "NO_VALID_RULESET_LOADED").build();
   }
+
+  public long loadedVersion() {
+    return loadedVersion.get();
+  }
 }

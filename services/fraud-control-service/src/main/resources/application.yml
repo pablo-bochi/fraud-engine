@@ -1,4 +1,6 @@
 spring:
+  application:
+    name: fraud-control-service
   datasource:
     url: ${CONTROL_DB_URL:jdbc:postgresql://postgres:5432/fraud}
     username: ${CONTROL_DB_USERNAME:fraud}
@@ -13,3 +15,11 @@ control:
     issuer: ${CONTROL_JWT_ISSUER:fraud-local}
     audience: ${CONTROL_JWT_AUDIENCE:fraud-control}
     public-key-location: ${CONTROL_JWT_PUBLIC_KEY_LOCATION:file:.local/security/rule-control-public.pem}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}

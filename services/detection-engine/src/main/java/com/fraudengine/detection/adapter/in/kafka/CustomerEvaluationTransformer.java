@@ -10,9 +10,11 @@ import com.fraudengine.detection.application.RuleEvaluator;
 import com.fraudengine.detection.domain.assessment.AssessmentAggregation;
 import com.fraudengine.detection.domain.assessment.RuleResult;
 import com.fraudengine.detection.domain.rules.HistoricalFactsPort;
+import io.micrometer.core.instrument.Timer;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.apache.kafka.streams.kstream.ValueTransformerWithKey;
 import org.apache.kafka.streams.processor.ProcessorContext;
@@ -35,8 +37,18 @@ final class CustomerEvaluationTransformer
 
   private ProcessorContext context;
 
+  private final Timer evaluationTimer;
+
   CustomerEvaluationTransformer(AtomicReference<CompiledRuleSet> activeRuleset) {
+
+    this(activeRuleset, null);
+  }
+
+  CustomerEvaluationTransformer(
+      AtomicReference<CompiledRuleSet> activeRuleset, Timer evaluationTimer) {
+
     this.activeRuleset = activeRuleset;
+    this.evaluationTimer = evaluationTimer;
   }
 
   @Override
@@ -51,6 +63,7 @@ final class CustomerEvaluationTransformer
 
   @Override
   public TransactionAssessment transform(String customerId, TransactionEvent event) {
+    long startedAt = System.nanoTime();
     CompiledRuleSet ruleset = activeRuleset.get();
 
     if (ruleset == null) {
@@ -105,20 +118,27 @@ final class CustomerEvaluationTransformer
 
     Instant evaluatedAt = Instant.now();
 
-    return new TransactionAssessment(
-        1,
-        idFactory.assessmentId(event.eventId()),
-        event.eventId(),
-        event.transactionId(),
-        event.customerId(),
-        aggregation.status().name(),
-        aggregation.finalSeverity(),
-        serializedRuleResults,
-        ruleset.snapshot().version(),
-        evaluatedAt,
-        evaluatedAt,
-        late,
-        event.traceId());
+    TransactionAssessment assessment =
+        new TransactionAssessment(
+            1,
+            idFactory.assessmentId(event.eventId()),
+            event.eventId(),
+            event.transactionId(),
+            event.customerId(),
+            aggregation.status().name(),
+            aggregation.finalSeverity(),
+            serializedRuleResults,
+            ruleset.snapshot().version(),
+            evaluatedAt,
+            evaluatedAt,
+            late,
+            event.traceId());
+
+    if (evaluationTimer != null) {
+      evaluationTimer.record(System.nanoTime() - startedAt, TimeUnit.NANOSECONDS);
+    }
+
+    return assessment;
   }
 
   private void updateHistory(
