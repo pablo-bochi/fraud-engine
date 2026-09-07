@@ -1,4 +1,4 @@
-# Protocolo de benchmark da U8
+# Protocolo do benchmark de capacidade
 
 ## Objetivo e limites
 

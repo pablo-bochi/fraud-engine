@@ -161,7 +161,7 @@ docker compose --project-name fraud-engine-smoke --env-file .env.example down -v
 
 Essa lacuna de registro TDD é uma limitação documental da unidade, não deve ser reescrita como um ciclo que não foi capturado.
 
-## U8 — Teste de carga e evidência de capacidade
+## Teste de carga e evidência de capacidade
 
 | Comportamento | Vermelho observado | Verde observado |
 |---|---|---|

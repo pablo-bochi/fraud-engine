@@ -5,7 +5,7 @@
 - U1–U5 estão implementadas e formam o fluxo obrigatório.
 - U6 opcional está implementada com Prometheus, Grafana e Kafka UI.
 - U7 foi absorvida pelo smoke de U5; não é pendência separada.
-- U8 opcional foi executada; a ferramenta, o protocolo e os resultados medidos estão em `tools/load-test/` e `docs/performance/`.
+- O benchmark opcional de capacidade foi executado; a ferramenta, o protocolo e os resultados medidos estão em `tools/load-test/` e `docs/performance/`.
 - U9 documenta o repositório. Automação de CI foi explicitamente retirada de seu escopo; a verificação é local e reproduzível.
 
 ## Limitações do MVP
@@ -52,7 +52,7 @@
 
 ## Evolução recomendada
 
-1. Repetir a U8 com mais recursos, mais threads/instâncias e perfis de chaves, documentando cada configuração e mantendo a reconciliação antes de discutir SLO.
+1. Repetir o benchmark de capacidade com mais recursos, mais threads/instâncias e perfis de chaves, documentando cada configuração e mantendo a reconciliação antes de discutir SLO.
 2. Ensaiar restauração de changelogs, indisponibilidade e múltiplas instâncias; medir tempo de convergência e tamanho dos stores.
 3. Adicionar IdP corporativo, MSK IAM/TLS, Secrets Manager/KMS, ACLs por tópico e identidade de workload.
 4. Criar arquivo de entrada criptografado, investigação com acesso restrito e replay auditado com notificações bloqueadas.

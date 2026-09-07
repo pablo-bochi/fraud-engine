@@ -198,7 +198,7 @@ def render_results_markdown(
     results: Sequence[ScenarioResult],
 ) -> str:
     lines = [
-        "# Resultados do benchmark U8",
+        "# Resultados do benchmark de capacidade",
         "",
         f"Executado em `{executed_at.astimezone(timezone.utc).isoformat()}` com semente fixa `{seed}`.",
         "",

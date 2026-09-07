@@ -1,4 +1,4 @@
-# Resultados do benchmark U8
+# Resultados do benchmark de capacidade
 
 Executado em `2026-09-07T15:22:03.398543+00:00` com semente fixa `20260907`.
 

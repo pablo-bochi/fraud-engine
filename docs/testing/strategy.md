@@ -37,7 +37,7 @@ docker compose --env-file .env.example config --quiet
 # prova ponta a ponta em projeto Compose isolado
 ./scripts/smoke.sh
 
-# testes puros e protocolo completo da U8 (fora do CI comum)
+# testes puros e protocolo completo do benchmark de capacidade (fora do CI comum)
 /tmp/fraud-engine-u8-venv/bin/python -m pytest tools/load-test/test_load_test.py -q
 # veja docs/performance/benchmark-protocol.md antes de executar a carga
 ```

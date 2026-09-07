@@ -114,3 +114,4 @@ def test_report_states_each_capacity_target_without_extrapolation() -> None:
     assert "p99,9" in report
     assert "containers" in report
     assert "AMOUNT_THRESHOLD(10000 BRL)" in report
+    assert "U8" not in report

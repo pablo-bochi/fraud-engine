@@ -137,7 +137,7 @@ docker compose --env-file .env.example config --quiet
 
 A finalidade de cada camada e o que ainda não é testado estão em [docs/testing/strategy.md](docs/testing/strategy.md). Os ciclos registrados durante a implementação estão em [docs/testing/tdd-evidence.md](docs/testing/tdd-evidence.md).
 
-## Benchmark opcional da U8
+## Benchmark opcional de capacidade
 
 O ensaio de carga fica fora do caminho comum de CI e exige uma stack limpa contendo apenas Kafka, o inicializador de tópicos e o motor. O protocolo reproduzível, incluindo criação do ambiente Python, aquecimento, carga sustentada, pico e limpeza, está em [docs/performance/benchmark-protocol.md](docs/performance/benchmark-protocol.md). Os resultados medidos nesta máquina estão em [docs/performance/results.md](docs/performance/results.md).
 
@@ -170,6 +170,6 @@ O inventário completo de tópicos, chaves e retenções está em [docs/architec
 
 ## Escopo honesto
 
-O MVP executa o núcleo local, incluindo a pilha de observabilidade com Prometheus, Grafana e Kafka UI. A U8 executa um benchmark local reproduzível: a meta de 99,9% em até 500 ms foi atingida, mas as metas de vazão de 8.000 TPS e pico de 25.000 TPS não foram atingidas no ambiente medido. O MVP não executa replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
+O MVP executa o núcleo local, incluindo a pilha de observabilidade com Prometheus, Grafana e Kafka UI. O benchmark local reproduzível de capacidade atingiu a meta de 99,9% em até 500 ms, mas não atingiu as metas de vazão de 8.000 TPS e pico de 25.000 TPS no ambiente medido. O MVP não executa replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
 
 Veja [docs/limitations-and-evolution.md](docs/limitations-and-evolution.md) e [docs/ai-usage.md](docs/ai-usage.md).
