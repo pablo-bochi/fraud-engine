@@ -2,14 +2,24 @@ package com.fraudengine.detection.adapter.in.kafka;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fraudengine.contracts.RuleSetSnapshot;
 import com.fraudengine.contracts.TransactionAssessment;
 import com.fraudengine.contracts.TransactionEvent;
 import com.fraudengine.detection.DetectionEngineApplication;
 import com.fraudengine.detection.health.StreamsReadinessHealthIndicator;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Properties;
 import java.util.UUID;
@@ -31,6 +41,8 @@ import org.testcontainers.utility.DockerImageName;
 
 @Testcontainers
 class DetectionKafkaIntegrationTest {
+  private static final ObjectMapper MAPPER = new ObjectMapper().findAndRegisterModules();
+
   @Container
   static final KafkaContainer KAFKA =
       new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
@@ -86,27 +98,25 @@ class DetectionKafkaIntegrationTest {
   private static void publishRuleset() throws Exception {
     try (KafkaProducer<String, RuleSetSnapshot> producer =
         producer(new JsonSerde<>(RuleSetSnapshot.class))) {
-      var rule =
+
+      ObjectNode rule = JsonNodeFactory.instance.objectNode();
+
+      rule.put("ruleId", "limit");
+      rule.put("ruleVersion", 1);
+      rule.put("evaluationOrder", 0);
+      rule.put("severity", "HIGH");
+
+      rule.set(
+          "definition",
           JsonNodeFactory.instance
               .objectNode()
-              .put("ruleId", "limit")
-              .put("ruleVersion", "1")
-              .put("severity", "HIGH")
-              .set(
-                  "definition",
-                  JsonNodeFactory.instance
-                      .objectNode()
-                      .put("type", "AMOUNT_THRESHOLD")
-                      .put("amountMinor", 100)
-                      .put("currency", "BRL"));
-      producer
-          .send(
-              new ProducerRecord<>(
-                  DetectionTopology.RULESET_TOPIC,
-                  "ACTIVE",
-                  new RuleSetSnapshot(
-                      1, "integration", 1, "hash", "rule-v1", List.of(rule), Instant.now())))
-          .get();
+              .put("type", "AMOUNT_THRESHOLD")
+              .put("amountMinor", 100)
+              .put("currency", "BRL"));
+
+      RuleSetSnapshot ruleset = validRuleset("integration", 1, List.of(rule));
+
+      producer.send(new ProducerRecord<>(DetectionTopology.RULESET_TOPIC, "ACTIVE", ruleset)).get();
     }
   }
 
@@ -172,5 +182,77 @@ class DetectionKafkaIntegrationTest {
     Properties properties = new Properties();
     properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
     return new KafkaProducer<>(properties, Serdes.String().serializer(), serde.serializer());
+  }
+
+  private static RuleSetSnapshot validRuleset(
+      String snapshotId, long version, List<JsonNode> rules) {
+
+    RuleSetSnapshot unsigned =
+        new RuleSetSnapshot(
+            1,
+            snapshotId,
+            version,
+            "",
+            "approved-" + snapshotId,
+            rules,
+            Instant.parse("2026-01-01T00:00:00Z"));
+
+    return new RuleSetSnapshot(
+        unsigned.schemaVersion(),
+        unsigned.snapshotId(),
+        unsigned.version(),
+        rulesetContentHash(unsigned),
+        unsigned.approvedChangeRuleVersionId(),
+        unsigned.rules(),
+        unsigned.createdAt());
+  }
+
+  private static String rulesetContentHash(RuleSetSnapshot snapshot) {
+
+    JsonNode serialized = MAPPER.valueToTree(snapshot);
+
+    ObjectNode unsigned = ((ObjectNode) serialized).deepCopy();
+
+    unsigned.remove("contentHash");
+
+    try {
+      byte[] canonicalPayload =
+          MAPPER.writeValueAsString(canonical(unsigned)).getBytes(StandardCharsets.UTF_8);
+
+      byte[] digest = MessageDigest.getInstance("SHA-256").digest(canonicalPayload);
+
+      return "sha256:" + HexFormat.of().formatHex(digest);
+    } catch (NoSuchAlgorithmException exception) {
+      throw new IllegalStateException("SHA_256_NOT_AVAILABLE", exception);
+    } catch (Exception exception) {
+      throw new IllegalStateException("RULESET_HASH_FAILED", exception);
+    }
+  }
+
+  private static JsonNode canonical(JsonNode value) {
+
+    if (value.isObject()) {
+      ObjectNode ordered = MAPPER.createObjectNode();
+
+      List<String> names = new ArrayList<>();
+
+      value.fieldNames().forEachRemaining(names::add);
+
+      names.stream()
+          .sorted(Comparator.naturalOrder())
+          .forEach(name -> ordered.set(name, canonical(value.get(name))));
+
+      return ordered;
+    }
+
+    if (value.isArray()) {
+      ArrayNode ordered = MAPPER.createArrayNode();
+
+      value.forEach(item -> ordered.add(canonical(item)));
+
+      return ordered;
+    }
+
+    return value;
   }
 }
