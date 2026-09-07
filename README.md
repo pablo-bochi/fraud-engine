@@ -1,59 +1,160 @@
 # Fraud Detection Engine
 
-Fundação de um motor assíncrono de detecção de transações suspeitas. A unidade U1 contém os contratos canônicos versionados, os tipos Java de transporte e a infraestrutura local compartilhada pelas unidades seguintes.
+Fatia vertical de um motor assíncrono de detecção de fraude. Transações imutáveis entram pelo Kafka, regras governadas são publicadas sem redeploy, o motor produz avaliações explicáveis e solicitações suspeitas terminam em uma entrega fictícia no Mailpit.
+
+O repositório separa três aplicações Java 21:
+
+- `fraud-control-service`: autoria, aprovação por quatro olhos, auditoria e outbox de snapshots;
+- `detection-engine`: Kafka Streams, regras sem estado e por janela, estado local e saídas atômicas;
+- `notification-service`: resolução local do contato, registro idempotente e envio SMTP.
+
+A visão completa, incluindo limites do MVP e desenho produtivo, está em [docs/architecture/overview.md](docs/architecture/overview.md).
 
 ## Pré-requisitos
 
-- Java 21
-- Docker com Compose v2
+- Java 21 (`java -version` deve indicar 21);
+- Docker com Compose v2;
+- Bash, `curl`, OpenSSL e Python 3;
+- portas locais livres: `8080`, `8081`, `8083`, `8025`, `9090`, `9094` e `3000`.
 
-## Build e contratos
+Não copie `.env.example` para executar os comandos abaixo: o Compose o recebe explicitamente. As credenciais e os dados são apenas locais e fictícios.
+
+Confirme que `JAVA_HOME` aponta para o JDK 21 antes do build. No macOS, por exemplo:
+
+```bash
+export JAVA_HOME="$(/usr/libexec/java_home -v 21)"
+export PATH="$JAVA_HOME/bin:$PATH"
+java -version
+```
+
+Executar o Spotless com um JDK posterior pode falhar por incompatibilidade com a API interna do `javac`, mesmo que o código tenha `release` 21.
+
+## Caminho mais curto: smoke completo
+
+Partindo de um checkout limpo:
 
 ```bash
 ./mvnw spotless:check verify -DskipITs
+docker compose --env-file .env.example config --quiet
+./scripts/smoke.sh
 ```
 
-Os schemas JSON Draft-07 em `contracts/schemas` são a interface externa. Exemplos aceitos e rejeitados ficam em `contracts/examples`, e o módulo `libs/contracts-java` fornece records de transporte e o `SchemaValidator`.
+O smoke limpa um projeto Compose isolado, compila as aplicações, gera chaves e JWTs locais, sobe a infraestrutura e os três serviços, cria e aprova uma regra, e publica duas transações. O resultado esperado contém:
 
-## Infraestrutura local
+```text
+SMOKE PASSED
+  normal assessment:      NOT_SUSPICIOUS
+  suspicious assessment:  SUSPICIOUS
+  internal alert:          observed
+  notification result:     SENT + replayed
+  delivery rows:           1
+  delivery attempts:       1
+  Mailpit messages:        1
+```
+
+O replay da solicitação produz novamente o mesmo resultado, mas mantém uma única linha de entrega, uma tentativa de SMTP e um e-mail.
+
+Para conservar a pilha ao final e inspecionar as evidências:
 
 ```bash
-docker compose --env-file .env.example up -d --wait
-docker compose --env-file .env.example run --rm kafka-init
-./mvnw verify -Pintegration
+KEEP_SMOKE_STACK=1 ./scripts/smoke.sh
 ```
 
-O Compose inicia Kafka em KRaft, PostgreSQL e Mailpit. Kafka e Mailpit expõem portas somente em `127.0.0.1` para testes e demonstração; PostgreSQL permanece restrito à rede interna. O inicializador de tópicos pode ser executado novamente para reconciliar partições, retenção e compactação.
+Abra:
 
-Para encerrar os processos sem remover os dados locais:
+- Mailpit: <http://localhost:8025>;
+- Kafka UI: <http://localhost:8083>;
+- Prometheus: <http://localhost:9090>;
+- Grafana: <http://localhost:3000> (`admin` / `admin-local-only`);
+- saúde do motor: <http://localhost:8081/actuator/health>.
+
+No Kafka UI, os principais resultados estão em `fraud.assessment.created.v1`, `fraud.alert.internal.v1`, `fraud.notification.requested.v1` e `fraud.notification.result.v1`. Os comandos equivalentes pela CLI estão na seção seguinte.
+
+Encerre e remova os volumes da pilha de smoke:
+
+```bash
+docker compose --project-name fraud-engine-smoke --env-file .env.example down -v --remove-orphans
+```
+
+## Inspeção pela CLI do Kafka
+
+Com a pilha preservada pelo comando anterior, leia avaliações confirmadas:
+
+```bash
+docker compose --project-name fraud-engine-smoke --env-file .env.example exec kafka \
+  /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server kafka:9092 \
+  --topic fraud.assessment.created.v1 \
+  --from-beginning \
+  --consumer-property isolation.level=read_committed \
+  --property print.key=true \
+  --property key.separator='|'
+```
+
+Troque apenas `--topic` para inspecionar alertas, solicitações e resultados. `Ctrl+C` encerra o consumidor.
+
+## Execução manual
+
+Para subir a plataforma sem executar o smoke:
+
+```bash
+./scripts/dev-bootstrap.sh
+./mvnw package -DskipTests
+docker compose --env-file .env.example up --build -d --wait
+```
+
+O bootstrap cria uma chave RSA e JWTs de uma hora em `.local/security/`, que é ignorado pelo Git. O Compose aguarda o inicializador idempotente de tópicos e aplica as migrations Flyway dos dois schemas PostgreSQL.
+
+O Postman collection em [docs/rules_postman_collection/Fraud Engine.postman_collection.json](docs/rules_postman_collection/Fraud%20Engine.postman_collection.json) cobre a API de regras. Os tokens são:
+
+- `.local/security/rule-author.jwt`: `RULE_WRITE` e `RULE_READ`;
+- `.local/security/rule-approver.jwt`: `RULE_APPROVE` e `RULE_READ`;
+- `.local/security/rule-auditor.jwt`: `AUDIT_READ`.
+
+O fluxo manual do motor e seus consumidores `read_committed` está detalhado em [docs/testing/u4-local.md](docs/testing/u4-local.md).
+
+Para encerrar sem apagar volumes:
 
 ```bash
 docker compose --env-file .env.example down
 ```
 
-As credenciais de `.env.example` são exclusivas do ambiente local. Arquivos `.env`, estado de execução e credenciais geradas não são versionados.
-
-## Serviço de controle de regras local
-
-O emissor de desenvolvimento gera um par RSA e dois JWTs de curta duração sob `.local/security/`. O serviço recebe somente a chave pública para validar assinatura, emissor, audiência, expiração e permissões.
+## Testes
 
 ```bash
-./scripts/dev-bootstrap.sh
-./mvnw -pl services/fraud-control-service -am package -DskipTests
-docker compose --env-file .env.example up -d --wait --build
-docker compose --env-file .env.example run --rm kafka-init
+# schemas, contratos, compilação e testes sem Docker
+./mvnw spotless:check verify -DskipITs
+
+# integrações Testcontainers (Docker obrigatório)
+./mvnw verify -Pintegration
+
+# configuração local
+docker compose --env-file .env.example config --quiet
+
+# fluxo real Kafka -> regras -> avaliação -> alerta -> Mailpit
+./scripts/smoke.sh
 ```
 
-O serviço fica disponível em `http://localhost:8080`. Os tokens ficam em `.local/security/rule-author.jwt`, `.local/security/rule-approver.jwt` e `.local/security/rule-auditor.jwt`; eles expiram em uma hora e podem ser renovados executando o bootstrap novamente.
+A finalidade de cada camada e o que ainda não é testado estão em [docs/testing/strategy.md](docs/testing/strategy.md). Os ciclos registrados durante a implementação estão em [docs/testing/tdd-evidence.md](docs/testing/tdd-evidence.md).
 
-| Método e rota | Permissão | Uso |
-|---|---|---|
-| `POST /api/v1/rules` | `RULE_WRITE` | Cria regra e versão inicial pendente. |
-| `POST /api/v1/rules/{ruleId}/versions` | `RULE_WRITE` | Propõe `UPSERT` ou `RETIRE`. |
-| `POST /api/v1/rules/{ruleId}/versions/{versionId}/approval` | `RULE_APPROVE` | Aprova e responde `202` com a publicação pendente. |
-| `POST /api/v1/rules/{ruleId}/versions/{versionId}/rejection` | `RULE_APPROVE` | Rejeita a proposta. |
-| `GET /api/v1/rules` | `RULE_READ` | Lista regras estáveis. |
-| `GET /api/v1/rules/{ruleId}/versions` | `RULE_READ` | Lista versões de uma regra. |
-| `GET /api/v1/rulesets/active` | `RULE_READ` | Exibe versões desejada e publicada, snapshot e acúmulo da outbox. |
-| `GET /api/v1/rulesets/active/outbox` | `RULE_READ` | Lista tentativas e estado da outbox. |
-| `GET /api/v1/audit-events` | `AUDIT_READ` | Lista a auditoria somente de acréscimo. |
+## Contratos, tópicos e API
+
+Os schemas JSON Draft-07 em `contracts/schemas` são a interface canônica; exemplos aceitos e rejeitados ficam em `contracts/examples`. O módulo `libs/contracts-java` contém os records de transporte e valida os schemas em runtime nas fronteiras relevantes.
+
+| Interface | Papel |
+|---|---|
+| `POST /api/v1/rules` | cria regra e versão inicial pendente |
+| `POST /api/v1/rules/{ruleId}/versions` | propõe alteração ou retirada |
+| `POST /api/v1/rules/{ruleId}/versions/{versionId}/approval` | aprova por outra identidade e retorna `202` |
+| `POST /api/v1/rules/{ruleId}/versions/{versionId}/rejection` | rejeita uma proposta |
+| `GET /api/v1/rulesets/active` | mostra versões desejada/publicada e snapshot |
+| `GET /api/v1/rulesets/active/outbox` | mostra o estado da publicação |
+| `GET /api/v1/audit-events` | consulta auditoria append-only |
+
+O inventário completo de tópicos, chaves e retenções está em [docs/architecture/overview.md](docs/architecture/overview.md#contratos-e-tópicos).
+
+## Escopo honesto
+
+O MVP executa o núcleo local, incluindo a pilha de observabilidade com Prometheus, Grafana e Kafka UI. Não executa benchmark de vazão e latência, replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
+
+Veja [docs/limitations-and-evolution.md](docs/limitations-and-evolution.md) e [docs/ai-usage.md](docs/ai-usage.md).
