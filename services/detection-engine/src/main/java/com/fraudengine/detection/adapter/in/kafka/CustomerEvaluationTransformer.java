@@ -57,7 +57,13 @@ final class CustomerEvaluationTransformer
       throw new IllegalStateException("NO_VALID_RULESET_LOADED");
     }
 
-    long streamTime = Math.max(context.currentStreamTimeMs(), event.occurredAt().toEpochMilli());
+    long eventTime = event.occurredAt().toEpochMilli();
+
+    long currentStreamTime = context.currentStreamTimeMs();
+
+    boolean late = currentStreamTime >= 0 && eventTime < currentStreamTime;
+
+    long streamTime = Math.max(currentStreamTime, eventTime);
 
     long retentionCutoff = streamTime - HISTORY_RETENTION_MILLIS;
 
@@ -111,7 +117,7 @@ final class CustomerEvaluationTransformer
         ruleset.snapshot().version(),
         evaluatedAt,
         evaluatedAt,
-        false,
+        late,
         event.traceId());
   }
 

@@ -35,8 +35,8 @@ public final class DetectionTopology {
   static final String CUSTOMER_HISTORY = "customer-history";
   static final String ACTIVE_RULESETS_GLOBAL_STORE = "active-rulesets-global-store";
   private static final long IDENTITY_RETENTION_MILLIS = 24L * 60 * 60 * 1000;
-  private static final JsonSerde<TransactionEvent> TRANSACTION_EVENT_SERDE =
-      new JsonSerde<>(TransactionEvent.class);
+  private static final TransactionEventPayloadValidator TRANSACTION_EVENT_VALIDATOR =
+      new TransactionEventPayloadValidator();
   private final AtomicReference<CompiledRuleSet> activeRuleset = new AtomicReference<>();
   private final StreamsReadinessHealthIndicator readiness;
   private final DeterministicIdFactory idFactory = new DeterministicIdFactory();
@@ -184,20 +184,11 @@ public final class DetectionTopology {
   }
 
   private ValidationResult validate(String key, byte[] payload) {
-    try {
-      TransactionEvent event =
-          TRANSACTION_EVENT_SERDE.deserializer().deserialize(TRANSACTION_TOPIC, payload);
-      return new ValidationResult(
-          event,
-          key != null
-              && event != null
-              && key.equals(event.transactionId())
-              && event.eventId() != null
-              && event.customerId() != null
-              && event.occurredAt() != null);
-    } catch (IllegalArgumentException exception) {
-      return new ValidationResult(null, false);
-    }
+    TransactionEvent event = TRANSACTION_EVENT_VALIDATOR.parseValid(payload);
+
+    boolean valid = key != null && event != null && key.equals(event.transactionId());
+
+    return new ValidationResult(event, valid);
   }
 
   private InvalidEventReference invalid(TransactionEvent event) {

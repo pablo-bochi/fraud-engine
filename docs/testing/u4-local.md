@@ -36,13 +36,76 @@ curl --silent http://localhost:8081/actuator/health
 
 ## 3. Publicar o ruleset dinamico
 
-No mesmo shell que definiu `RUN_ID`, publique uma regra sem estado e uma `COUNT_WINDOW`. A atualizacao nao reinicia o motor.
+No mesmo shell que definiu `RUN_ID`, gere um snapshot valido contendo uma regra sem estado e uma `COUNT_WINDOW`.
+
+O motor valida o JSON Schema, a versao, o hash SHA-256 do snapshot e a DSL antes de trocar o ruleset ativo. Por isso o fixture abaixo gera o `contentHash` a partir da representacao canonica do snapshot sem o proprio campo `contentHash`.
 
 ```bash
-RULESET_VERSION="$RUN_ID"
-NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+export RULESET_VERSION="$RUN_ID"
+export NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-printf '%s\n' "ACTIVE|{\"schemaVersion\":1,\"snapshotId\":\"u4-local-$RUN_ID\",\"version\":$RULESET_VERSION,\"contentHash\":\"sha256:u4-local-$RUN_ID\",\"approvedChangeRuleVersionId\":\"u4-local-rule\",\"rules\":[{\"ruleId\":\"amount-10000\",\"ruleVersion\":\"1\",\"severity\":\"HIGH\",\"definition\":{\"type\":\"AMOUNT_THRESHOLD\",\"amountMinor\":10000,\"currency\":\"BRL\"}},{\"ruleId\":\"two-in-ten-minutes\",\"ruleVersion\":\"1\",\"severity\":\"MEDIUM\",\"definition\":{\"type\":\"COUNT_WINDOW\",\"minimumCount\":2,\"windowSeconds\":600}}],\"createdAt\":\"$NOW\"}" \
+RULESET_RECORD="$(
+python3 <<'PY'
+import hashlib
+import json
+import os
+
+snapshot = {
+    "schemaVersion": 1,
+    "snapshotId": f"u4-local-{os.environ['RUN_ID']}",
+    "version": int(os.environ["RULESET_VERSION"]),
+    "approvedChangeRuleVersionId": "u4-local-rule",
+    "rules": [
+        {
+            "ruleId": "amount-10000",
+            "ruleVersion": 1,
+            "evaluationOrder": 0,
+            "severity": "HIGH",
+            "definition": {
+                "type": "AMOUNT_THRESHOLD",
+                "amountMinor": 10000,
+                "currency": "BRL"
+            }
+        },
+        {
+            "ruleId": "two-in-ten-minutes",
+            "ruleVersion": 1,
+            "evaluationOrder": 1,
+            "severity": "MEDIUM",
+            "definition": {
+                "type": "COUNT_WINDOW",
+                "minimumCount": 2,
+                "windowSeconds": 600
+            }
+        }
+    ],
+    "createdAt": os.environ["NOW"]
+}
+
+canonical_unsigned = json.dumps(
+    snapshot,
+    sort_keys=True,
+    separators=(",", ":")
+)
+
+snapshot["contentHash"] = (
+    "sha256:"
+    + hashlib.sha256(
+        canonical_unsigned.encode("utf-8")
+    ).hexdigest()
+)
+
+print(
+    "ACTIVE|"
+    + json.dumps(
+        snapshot,
+        separators=(",", ":")
+    )
+)
+PY
+)"
+
+printf '%s\n' "$RULESET_RECORD" \
   | docker compose --env-file .env.example exec -T kafka \
       /opt/kafka/bin/kafka-console-producer.sh \
       --bootstrap-server localhost:9092 \
@@ -50,7 +113,11 @@ printf '%s\n' "ACTIVE|{\"schemaVersion\":1,\"snapshotId\":\"u4-local-$RUN_ID\",\
       --property parse.key=true \
       --property key.separator='|'
 
-until curl --silent http://localhost:8081/actuator/health | grep -q "\"loadedVersion\":$RULESET_VERSION"; do sleep 1; done
+until curl --silent http://localhost:8081/actuator/health \
+  | grep -q "\"loadedVersion\":$RULESET_VERSION"; do
+  sleep 1
+done
+
 curl --silent http://localhost:8081/actuator/health
 ```
 

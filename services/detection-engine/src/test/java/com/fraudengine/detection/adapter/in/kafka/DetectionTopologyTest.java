@@ -1275,6 +1275,163 @@ class DetectionTopologyTest {
     }
   }
 
+  @Test
+  void routesStructurallyInvalidEventWithoutAdvancingStreamTimeOrMutatingHistory() {
+    Properties properties = new Properties();
+    properties.put(StreamsConfig.APPLICATION_ID_CONFIG, "invalid-schema-stream-time-test");
+    properties.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:9092");
+
+    try (TopologyTestDriver driver =
+        new TopologyTestDriver(new DetectionTopology().build(), properties)) {
+
+      var rulesets =
+          driver.createInputTopic(
+              DetectionTopology.RULESET_TOPIC,
+              Serdes.String().serializer(),
+              new JsonSerde<>(RuleSetSnapshot.class).serializer());
+
+      var transactions =
+          driver.createInputTopic(
+              DetectionTopology.TRANSACTION_TOPIC,
+              Serdes.String().serializer(),
+              Serdes.ByteArray().serializer());
+
+      var invalid =
+          driver.createOutputTopic(
+              DetectionTopology.INVALID_TOPIC,
+              Serdes.String().deserializer(),
+              new JsonSerde<>(InvalidEventReference.class).deserializer());
+
+      var assessments =
+          driver.createOutputTopic(
+              DetectionTopology.ASSESSMENT_TOPIC,
+              Serdes.String().deserializer(),
+              new JsonSerde<>(TransactionAssessment.class).deserializer());
+
+      rulesets.pipeInput(
+          "ACTIVE",
+          testRuleset(
+              "invalid-event-ruleset",
+              1,
+              List.of(testRule("count", 1, 0, "HIGH", countCondition(600, 2)))));
+
+      String invalidPayload =
+          """
+          {
+            "schemaVersion": 1,
+            "eventId": "invalid-event",
+            "transactionId": "invalid-tx",
+            "customerId": "invalid-customer",
+            "amountMinor": -1,
+            "currency": "BRL",
+            "occurredAt": "2026-01-01T01:00:00Z",
+            "transactionType": "PURCHASE",
+            "channel": "APP",
+            "merchantCountry": "BR",
+            "deviceIdHash": "device",
+            "traceId": "invalid-trace"
+          }
+          """;
+
+      transactions.pipeInput("invalid-tx", invalidPayload.getBytes(StandardCharsets.UTF_8));
+
+      assertThat(invalid.isEmpty())
+          .as("structurally invalid event must be routed to invalid topic")
+          .isFalse();
+
+      assertThat(invalid.readValue().reasonCode()).isEqualTo("INVALID_TRANSACTION_EVENT");
+
+      assertThat(assessments.isEmpty())
+          .as("structurally invalid event must not produce an assessment")
+          .isTrue();
+
+      TransactionEvent valid =
+          testEvent(
+              "valid-after-invalid",
+              "valid-tx-after-invalid",
+              "valid-customer",
+              100,
+              Instant.parse("2026-01-01T00:00:00Z"));
+
+      byte[] serializedValid =
+          new JsonSerde<>(TransactionEvent.class)
+              .serializer()
+              .serialize(DetectionTopology.TRANSACTION_TOPIC, valid);
+
+      transactions.pipeInput(valid.transactionId(), serializedValid);
+
+      TransactionAssessment assessment = assessments.readValue();
+
+      assertThat(assessment.status())
+          .as("invalid event timestamp must not advance detection stream time")
+          .isEqualTo("NOT_SUSPICIOUS");
+    }
+  }
+
+  @Test
+  void marksOutOfOrderEventAsLateWhileStillEvaluatingIt() {
+    Properties properties = new Properties();
+    properties.put(StreamsConfig.APPLICATION_ID_CONFIG, "late-flag-test");
+    properties.put(StreamsConfig.BOOTSTRAP_SERVERS_CONFIG, "dummy:9092");
+
+    try (TopologyTestDriver driver =
+        new TopologyTestDriver(new DetectionTopology().build(), properties)) {
+
+      var rulesets =
+          driver.createInputTopic(
+              DetectionTopology.RULESET_TOPIC,
+              Serdes.String().serializer(),
+              new JsonSerde<>(RuleSetSnapshot.class).serializer());
+
+      var transactions =
+          driver.createInputTopic(
+              DetectionTopology.TRANSACTION_TOPIC,
+              Serdes.String().serializer(),
+              new JsonSerde<>(TransactionEvent.class).serializer());
+
+      var assessments =
+          driver.createOutputTopic(
+              DetectionTopology.ASSESSMENT_TOPIC,
+              Serdes.String().deserializer(),
+              new JsonSerde<>(TransactionAssessment.class).deserializer());
+
+      rulesets.pipeInput(
+          "ACTIVE",
+          testRuleset(
+              "late-flag-ruleset",
+              1,
+              List.of(testRule("amount", 1, 0, "HIGH", amountCondition(10_000, "BRL")))));
+
+      transactions.pipeInput(
+          "late-flag-newer",
+          testEvent(
+              "late-flag-event-newer",
+              "late-flag-newer",
+              "late-flag-customer",
+              100,
+              Instant.parse("2026-01-01T00:02:00Z")));
+
+      TransactionAssessment newer = assessments.readValue();
+
+      assertThat(newer.late()).isFalse();
+
+      transactions.pipeInput(
+          "late-flag-older",
+          testEvent(
+              "late-flag-event-older",
+              "late-flag-older",
+              "late-flag-customer",
+              100,
+              Instant.parse("2026-01-01T00:01:00Z")));
+
+      TransactionAssessment older = assessments.readValue();
+
+      assertThat(older.status()).isEqualTo("NOT_SUSPICIOUS");
+
+      assertThat(older.late()).isTrue();
+    }
+  }
+
   private static RuleSetSnapshot testRuleset(
       String snapshotId, long version, List<JsonNode> rules) {
 

@@ -55,3 +55,34 @@ Comandos de verificação executados nesta etapa:
 # requer o Kafka local já iniciado; ativa o teste do adaptador Kafka
 KAFKA_BOOTSTRAP_SERVERS=localhost:9094 ./mvnw -pl services/fraud-control-service -am verify -Pintegration
 ```
+
+## U4 — Motor de deteccao com Kafka Streams
+
+| Comportamento | Vermelho observado | Verde observado |
+|---|---|---|
+| Evento normal produz somente assessment | topologia e roteamento ainda nao existiam | `NOT_SUSPICIOUS` e nenhuma saida condicional |
+| Multiplas regras acionadas geram alerta consolidado | avaliacao nao consolidava o conjunto completo | regras `HIGH` e `CRITICAL` aparecem no mesmo alerta com severidade `CRITICAL` |
+| Ruleset e atualizado sem redeploy | ruleset era estatico no processamento | Global Store aceita snapshot novo e novas avaliacoes usam sua versao |
+| DSL composta reutiliza o dominio | topologia possuia logica de avaliacao duplicada | `ALL` e `ANY` usam o `RuleEvaluator` da U3 |
+| `COUNT_WINDOW` respeita a janela declarada | janela estava fixa no adaptador | cada regra usa seu proprio `windowSeconds` |
+| Historico insuficiente produz resultado inconclusivo | evento antigo era tratado como historico vazio conhecido | regra stateful retorna `NOT_EVALUATED` e assessment fica `INCONCLUSIVE` |
+| Evento fora de ordem usa somente fatos anteriores | historico temporal nao distinguia adequadamente event-time | fatos posteriores ao `occurredAt` nao participam e eventos tardios contribuem para eventos futuros |
+| Evento fora de ordem e identificado | `late` era sempre `false` | evento abaixo do stream-time e avaliado com `late=true` |
+| Duplicata identica nao repete efeitos | deduplicacao armazenava apenas existencia do `eventId` | fingerprint igual suprime nova avaliacao |
+| Mesmo `eventId` com payload diferente e isolado | replay conflitante era descartado como duplicata | conflito gera `EVENT_IDENTITY_CONFLICT` em quarentena |
+| Mesmo `transactionId` com outro `eventId` e isolado | identidade conflitante nao estava protegida integralmente | conflito gera `TRANSACTION_IDENTITY_CONFLICT` sem alterar historico |
+| Horizonte online de identidade expira | stores de identidade nunca expiravam logicamente | identidade e deduplicacao sao tratadas como expiradas apos 24 horas de stream-time |
+| Snapshot com DSL invalida nao substitui o ativo | compiler aceitava apenas validacoes parciais | DSL nao suportada preserva o ultimo snapshot valido |
+| Snapshot com hash invalido nao substitui o ativo | `contentHash` nao era verificado | SHA-256 canonico e conferido antes da ativacao |
+| Snapshot fora do contrato nao substitui o ativo | schema nao era validado no motor | JSON Schema Draft-07 e aplicado antes do compile |
+| Evento estruturalmente invalido nao entra no motor | Jackson aceitava valores que violavam o contrato | JSON Schema rejeita o evento, publica referencia invalida e nao altera o historico |
+| Evento invalido nao contamina event-time | timestamp extractor usava `occurredAt` de payload que violava o contrato | somente payload estruturalmente valido pode avancar o stream-time |
+| Kafka real confirma processamento transacional | fixture de integracao era rejeitado pelo novo contrato | Testcontainers confirma startup, ruleset valido e assessment visivel com `read_committed` |
+
+Comandos de verificacao executados nesta etapa:
+
+```bash
+./mvnw -pl services/detection-engine -am test
+./mvnw -pl services/detection-engine -am verify
+./mvnw spotless:check
+./mvnw clean verify

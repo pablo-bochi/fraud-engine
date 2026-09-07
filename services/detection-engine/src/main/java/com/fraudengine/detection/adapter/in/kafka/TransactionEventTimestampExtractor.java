@@ -6,34 +6,25 @@ import org.apache.kafka.streams.processor.TimestampExtractor;
 
 final class TransactionEventTimestampExtractor implements TimestampExtractor {
 
-  private static final JsonSerde<TransactionEvent> SERDE = new JsonSerde<>(TransactionEvent.class);
+  private static final TransactionEventPayloadValidator VALIDATOR =
+      new TransactionEventPayloadValidator();
 
   @Override
   public long extract(ConsumerRecord<Object, Object> record, long partitionTime) {
-
     if (!(record.value() instanceof byte[] payload)) {
-      return fallback(record, partitionTime);
+      return currentStreamTime(partitionTime);
     }
 
-    try {
-      TransactionEvent event = SERDE.deserializer().deserialize(record.topic(), payload);
+    TransactionEvent event = VALIDATOR.parseValid(payload);
 
-      if (event != null && event.occurredAt() != null) {
-        return event.occurredAt().toEpochMilli();
-      }
-    } catch (IllegalArgumentException ignored) {
-      // Payload validation routes malformed records later.
+    if (event == null) {
+      return currentStreamTime(partitionTime);
     }
 
-    return fallback(record, partitionTime);
+    return event.occurredAt().toEpochMilli();
   }
 
-  private long fallback(ConsumerRecord<Object, Object> record, long partitionTime) {
-
-    if (partitionTime >= 0) {
-      return partitionTime;
-    }
-
-    return Math.max(record.timestamp(), 0);
+  private long currentStreamTime(long partitionTime) {
+    return Math.max(partitionTime, 0);
   }
 }
