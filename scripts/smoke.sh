@@ -28,6 +28,14 @@ cleanup() {
   compose down -v --remove-orphans >/dev/null 2>&1 || true
 }
 
+finish() {
+  if [[ "${KEEP_SMOKE_STACK:-0}" == "1" ]]; then
+    echo "==> Keeping smoke stack running for inspection"
+  else
+    cleanup
+  fi
+}
+
 fail() {
   echo "SMOKE FAILED: $1" >&2
 
@@ -116,7 +124,7 @@ mailpit_total_is_one() {
 
 echo "==> Cleaning previous smoke stack"
 cleanup
-trap cleanup EXIT
+trap finish EXIT
 
 echo "==> Building applications"
 ./mvnw package -DskipTests

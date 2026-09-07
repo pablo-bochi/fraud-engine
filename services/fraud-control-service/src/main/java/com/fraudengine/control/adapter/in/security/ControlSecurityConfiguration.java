@@ -51,7 +51,9 @@ public class ControlSecurityConfiguration {
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .authorizeHttpRequests(
             auth ->
-                auth.requestMatchers(
+                auth.requestMatchers("/actuator/health", "/actuator/prometheus")
+                    .permitAll()
+                    .requestMatchers(
                         org.springframework.http.HttpMethod.GET,
                         "/api/v1/rules/**",
                         "/api/v1/rulesets/**")
