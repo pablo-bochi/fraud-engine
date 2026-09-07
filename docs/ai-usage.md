@@ -15,9 +15,7 @@ Não se atribui à IA autoria autônoma da solução nem se usa geração como s
 | investigação e verificação | interpretar falhas de build, integração e smoke; propor hipóteses e testes de regressão | hipóteses foram confirmadas por execução local, não aceitas apenas pela resposta gerada |
 | documentação final | cruzar README, arquitetura, configurações, testes, histórico e requisitos do case | afirmações, limitações e comandos foram conferidos no repositório e no ambiente local |
 
-A IA não foi usada para produzir resultados de capacidade: vazão e latência permanecem declaradas
-como não medidas. Também não substituiu decisões jurídicas ou operacionais sobre LGPD, segurança e
-prontidão produtiva.
+A IA apoiou a implementação da ferramenta e a interpretação do benchmark de capacidade; os números foram produzidos pela execução local registrada, não por geração ou estimativa. Também não substituiu decisões jurídicas ou operacionais sobre LGPD, segurança e prontidão produtiva.
 
 ## Classes implementadas integralmente pelo autor
 

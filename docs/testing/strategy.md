@@ -17,6 +17,7 @@ A suíte separa provas rápidas de domínio e contrato das integrações que exi
 | SMTP | Testcontainers Mailpit | envio real e contenção do contato no notificador |
 | ponta a ponta | Docker Compose + Bash | regra aprovada, avaliação normal/suspeita, alerta, resultado, replay e um e-mail |
 | observabilidade | Compose, Prometheus e dashboard provisionado | scrape dos três serviços, métricas sem alta cardinalidade e inspeção local |
+| desempenho opcional | Python, `confluent-kafka` e stack Compose reduzida | percentis, limite de 500 ms, vazão observada e reconciliação de entradas/avaliações/alertas |
 
 ## Comandos canônicos
 
@@ -35,6 +36,10 @@ docker compose --env-file .env.example config --quiet
 
 # prova ponta a ponta em projeto Compose isolado
 ./scripts/smoke.sh
+
+# testes puros e protocolo completo do benchmark de capacidade (fora do CI comum)
+/tmp/fraud-engine-u8-venv/bin/python -m pytest tools/load-test/test_load_test.py -q
+# veja docs/performance/benchmark-protocol.md antes de executar a carga
 ```
 
 `-DskipITs` é necessário no caminho rápido porque os módulos vinculam classes `*IntegrationTest` ao Failsafe. O perfil `integration` ativa `integration-test` e `verify`.
@@ -70,7 +75,6 @@ unidade combina:
 
 ## Cenários adiados
 
-- benchmark sustentado e de pico de U8, incluindo p50/p95/p99/p99.9 e reconciliação em carga;
 - caos, perda de broker, restauração longa, múltiplas instâncias e failover PostgreSQL;
 - bootstrap bloqueante até um end offset conhecido e convergência coordenada do ruleset;
 - DLQ automatizada, investigação/replay da quarentena e retenção protegida de payload bruto;

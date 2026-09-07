@@ -137,6 +137,21 @@ docker compose --env-file .env.example config --quiet
 
 A finalidade de cada camada e o que ainda não é testado estão em [docs/testing/strategy.md](docs/testing/strategy.md). Os ciclos registrados durante a implementação estão em [docs/testing/tdd-evidence.md](docs/testing/tdd-evidence.md).
 
+## Benchmark opcional de capacidade
+
+O ensaio de carga fica fora do caminho comum de CI e exige uma stack limpa contendo apenas Kafka, o inicializador de tópicos e o motor. O protocolo reproduzível, incluindo criação do ambiente Python, aquecimento, carga sustentada, pico e limpeza, está em [docs/performance/benchmark-protocol.md](docs/performance/benchmark-protocol.md). Os resultados medidos nesta máquina estão em [docs/performance/results.md](docs/performance/results.md).
+
+```bash
+/tmp/fraud-engine-u8-venv/bin/python tools/load-test/load_test.py \
+  --bootstrap-servers 127.0.0.1:9094 \
+  --compose-project fraud-engine-u8 \
+  --publish-ruleset \
+  --timeout 600 \
+  --report docs/performance/results.md
+```
+
+O relatório só é gravado após reconciliar cada entrada com exatamente uma avaliação e cada avaliação suspeita com exatamente um alerta. Os números locais não certificam capacidade produtiva.
+
 ## Contratos, tópicos e API
 
 Os schemas JSON Draft-07 em `contracts/schemas` são a interface canônica; exemplos aceitos e rejeitados ficam em `contracts/examples`. O módulo `libs/contracts-java` contém os records de transporte e valida os schemas em runtime nas fronteiras relevantes.
@@ -155,6 +170,6 @@ O inventário completo de tópicos, chaves e retenções está em [docs/architec
 
 ## Escopo honesto
 
-O MVP executa o núcleo local, incluindo a pilha de observabilidade com Prometheus, Grafana e Kafka UI. Não executa benchmark de vazão e latência, replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
+O MVP executa o núcleo local, incluindo a pilha de observabilidade com Prometheus, Grafana e Kafka UI. O benchmark local reproduzível de capacidade atingiu a meta de 99,9% em até 500 ms, mas não atingiu as metas de vazão de 8.000 TPS e pico de 25.000 TPS no ambiente medido. O MVP não executa replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
 
 Veja [docs/limitations-and-evolution.md](docs/limitations-and-evolution.md) e [docs/ai-usage.md](docs/ai-usage.md).

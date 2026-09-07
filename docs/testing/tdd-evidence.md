@@ -161,6 +161,32 @@ docker compose --project-name fraud-engine-smoke --env-file .env.example down -v
 
 Essa lacuna de registro TDD é uma limitação documental da unidade, não deve ser reescrita como um ciclo que não foi capturado.
 
+## Teste de carga e evidência de capacidade
+
+| Comportamento | Vermelho observado | Verde observado |
+|---|---|---|
+| percentis e percentual em até 500 ms | as funções públicas ainda lançavam `NotImplementedError` para as amostras sintéticas conhecidas | p50, p95, p99 e p99,9 usam interpolação linear e o limite contabiliza as amostras literais esperadas |
+| reconciliação de efeitos | entradas ausentes, avaliações duplicadas, alertas inesperados e alertas duplicados ainda não eram classificados | cada divergência encerra a execução com `IntegrityError`; o caminho íntegro retorna contagens zeradas de falha |
+| relatório sem extrapolação | o construtor e o renderizador ainda lançavam `NotImplementedError` | o Markdown declara cada meta atingida ou não atingida e contém o aviso explícito de que o ensaio local não certifica produção |
+| Kafka real em baixa taxa | antes do ensaio não havia prova de integração do produtor/consumidor Python com as saídas transacionais | 200 entradas a 100 TPS produziram 200 avaliações e 1 alerta, sem perda ou duplicação, via consumidor `read_committed` |
+| carga completa | a primeira tentativa encerrou corretamente com `missing assessments=33352, missing alerts=1` após o timeout de 240 s e não gravou relatório | após remover trabalho quadrático do consumidor de medição, uma repetição em stack limpa com timeout de 600 s reconciliou 370.000 entradas, 370.000 avaliações e 370 alertas nos três cenários; atingiu a meta de latência e preservou como não atingidas as metas de vazão |
+
+Comandos executados nesta unidade:
+
+```bash
+/tmp/fraud-engine-u8-venv/bin/python -m pytest tools/load-test/test_load_test.py -q
+/tmp/fraud-engine-u8-venv/bin/python tools/load-test/load_test.py \
+  --bootstrap-servers 127.0.0.1:9094 \
+  --compose-project fraud-engine-u8 \
+  --scenario low-rate:100:2 --timeout 60 \
+  --report /tmp/fraud-engine-u8-low-rate.md
+/tmp/fraud-engine-u8-venv/bin/python tools/load-test/load_test.py \
+  --bootstrap-servers 127.0.0.1:9094 \
+  --compose-project fraud-engine-u8 \
+  --publish-ruleset --timeout 600 \
+  --report docs/performance/results.md
+```
+
 ## U9 — Documentação da entrega e regressão revelada pela verificação
 
 O escopo planejado da U9 é documental. Durante a verificação completa, porém,

@@ -28,3 +28,8 @@ replay_pid*
 .env
 .local/
 target/
+
+# Python load-test artifacts
+__pycache__/
+*.py[cod]
+.venv/

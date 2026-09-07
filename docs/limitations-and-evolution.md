@@ -5,7 +5,7 @@
 - U1–U5 estão implementadas e formam o fluxo obrigatório.
 - U6 opcional está implementada com Prometheus, Grafana e Kafka UI.
 - U7 foi absorvida pelo smoke de U5; não é pendência separada.
-- U8 não foi executada; não há relatório ou números de benchmark.
+- O benchmark opcional de capacidade foi executado; a ferramenta, o protocolo e os resultados medidos estão em `tools/load-test/` e `docs/performance/`.
 - U9 documenta o repositório. Automação de CI foi explicitamente retirada de seu escopo; a verificação é local e reproduzível.
 
 ## Limitações do MVP
@@ -45,14 +45,14 @@
 
 ### Escala e entrega
 
-- As metas de 8.000 TPS, pico de 25.000 TPS e 500 ms não foram testadas.
+- As metas de 8.000 TPS, pico de 25.000 TPS e 99,9% em até 500 ms foram testadas no MacBook Air M1 com 4,12 GB atribuídos ao Docker, 12 partições e uma thread do Kafka Streams. A meta de latência foi atingida nos dois cenários-alvo, com 100% das amostras em até 500 ms; as metas de vazão não foram atingidas: 5.717,37 TPS na carga sustentada e 5.749,18 TPS no pico. Todas as 365.000 entradas dos dois cenários-alvo foram reconciliadas, sem perda ou duplicação. Consulte `docs/performance/results.md`; os números não são certificação produtiva.
 - Não há tratamento de chaves quentes por salting, múltiplos fluxos ou dimensionamento automático.
 - O dashboard local demonstra sinais, mas não define SLO, paging ou retenção produtiva.
 - Não há automação de CI nesta entrega por decisão de escopo.
 
 ## Evolução recomendada
 
-1. Medir capacidade com U8 em ambiente descrito, reconciliando entradas e saídas antes de discutir SLO.
+1. Repetir o benchmark de capacidade com mais recursos, mais threads/instâncias e perfis de chaves, documentando cada configuração e mantendo a reconciliação antes de discutir SLO.
 2. Ensaiar restauração de changelogs, indisponibilidade e múltiplas instâncias; medir tempo de convergência e tamanho dos stores.
 3. Adicionar IdP corporativo, MSK IAM/TLS, Secrets Manager/KMS, ACLs por tópico e identidade de workload.
 4. Criar arquivo de entrada criptografado, investigação com acesso restrito e replay auditado com notificações bloqueadas.
