@@ -95,6 +95,14 @@ class DetectionTopologyTest {
   }
 
   @Test
+  void repartitionsByCustomerBeforeUsingCustomerScopedStateStores() {
+    String description = new DetectionTopology().build().describe().toString();
+
+    assertThat(description).contains("topic: customer-repartition");
+    assertThat(description).contains("topics: [customer-repartition]");
+  }
+
+  @Test
   void materializesTheAcceptedActiveRulesetInTheGlobalStore() {
     Properties properties = new Properties();
     properties.put(StreamsConfig.APPLICATION_ID_CONFIG, "global-store-test");

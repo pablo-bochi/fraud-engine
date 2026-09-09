@@ -48,7 +48,8 @@ class DetectionKafkaIntegrationTest {
       new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.8.0"));
 
   @Test
-  void startsTheApplicationAndPublishesACommittedAssessmentWithoutPostgres() throws Exception {
+  void evaluatesStatelessAndCustomerStatefulRulesAcrossSourcePartitionsWithoutPostgres()
+      throws Exception {
     createTopics();
     try (ConfigurableApplicationContext application =
         new SpringApplicationBuilder(DetectionEngineApplication.class)
@@ -61,8 +62,18 @@ class DetectionKafkaIntegrationTest {
       publishMalformedTransaction();
       publishRuleset();
       awaitRuleset(readiness);
-      publishTransaction();
-      assertThat(readAssessment()).isEqualTo("NOT_SUSPICIOUS");
+
+      publishTransaction(0, "stateless-event", "stateless-tx", "stateless-customer", 101);
+      assertThat(readAssessment("stateless-tx")).isEqualTo("SUSPICIOUS");
+
+      publishTransaction(0, "stateful-event-1", "stateful-tx-1", "stateful-customer", 1);
+      assertThat(readAssessment("stateful-tx-1")).isEqualTo("NOT_SUSPICIOUS");
+
+      publishTransaction(1, "stateful-event-2", "stateful-tx-2", "stateful-customer", 1);
+      assertThat(readAssessment("stateful-tx-2")).isEqualTo("NOT_SUSPICIOUS");
+
+      publishTransaction(0, "stateful-event-3", "stateful-tx-3", "stateful-customer", 1);
+      assertThat(readAssessment("stateful-tx-3")).isEqualTo("SUSPICIOUS");
     }
   }
 
@@ -74,12 +85,12 @@ class DetectionKafkaIntegrationTest {
           .createTopics(
               List.of(
                   new NewTopic(DetectionTopology.RULESET_TOPIC, 1, (short) 1),
-                  new NewTopic(DetectionTopology.TRANSACTION_TOPIC, 1, (short) 1),
-                  new NewTopic(DetectionTopology.ASSESSMENT_TOPIC, 1, (short) 1),
-                  new NewTopic(DetectionTopology.ALERT_TOPIC, 1, (short) 1),
-                  new NewTopic(DetectionTopology.NOTIFICATION_TOPIC, 1, (short) 1),
-                  new NewTopic(DetectionTopology.QUARANTINE_TOPIC, 1, (short) 1),
-                  new NewTopic(DetectionTopology.INVALID_TOPIC, 1, (short) 1)))
+                  new NewTopic(DetectionTopology.TRANSACTION_TOPIC, 2, (short) 1),
+                  new NewTopic(DetectionTopology.ASSESSMENT_TOPIC, 2, (short) 1),
+                  new NewTopic(DetectionTopology.ALERT_TOPIC, 2, (short) 1),
+                  new NewTopic(DetectionTopology.NOTIFICATION_TOPIC, 2, (short) 1),
+                  new NewTopic(DetectionTopology.QUARANTINE_TOPIC, 2, (short) 1),
+                  new NewTopic(DetectionTopology.INVALID_TOPIC, 2, (short) 1)))
           .all()
           .get();
     }
@@ -114,26 +125,42 @@ class DetectionKafkaIntegrationTest {
               .put("amountMinor", 100)
               .put("currency", "BRL"));
 
-      RuleSetSnapshot ruleset = validRuleset("integration", 1, List.of(rule));
+      ObjectNode countRule = JsonNodeFactory.instance.objectNode();
+      countRule.put("ruleId", "count");
+      countRule.put("ruleVersion", 1);
+      countRule.put("evaluationOrder", 1);
+      countRule.put("severity", "HIGH");
+      countRule.set(
+          "definition",
+          JsonNodeFactory.instance
+              .objectNode()
+              .put("type", "COUNT_WINDOW")
+              .put("windowSeconds", 600)
+              .put("minimumCount", 3));
+
+      RuleSetSnapshot ruleset = validRuleset("integration", 1, List.of(rule, countRule));
 
       producer.send(new ProducerRecord<>(DetectionTopology.RULESET_TOPIC, "ACTIVE", ruleset)).get();
     }
   }
 
-  private static void publishTransaction() throws Exception {
+  private static void publishTransaction(
+      int partition, String eventId, String transactionId, String customerId, long amountMinor)
+      throws Exception {
     try (KafkaProducer<String, TransactionEvent> producer =
         producer(new JsonSerde<>(TransactionEvent.class))) {
       producer
           .send(
               new ProducerRecord<>(
                   DetectionTopology.TRANSACTION_TOPIC,
-                  "integration-tx",
+                  partition,
+                  transactionId,
                   new TransactionEvent(
                       1,
-                      "integration-event",
-                      "integration-tx",
-                      "integration-customer",
-                      1,
+                      eventId,
+                      transactionId,
+                      customerId,
+                      amountMinor,
                       "BRL",
                       Instant.now(),
                       "PURCHASE",
@@ -159,7 +186,7 @@ class DetectionKafkaIntegrationTest {
     }
   }
 
-  private static String readAssessment() {
+  private static String readAssessment(String transactionId) {
     Properties properties = new Properties();
     properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, KAFKA.getBootstrapServers());
     properties.put(ConsumerConfig.GROUP_ID_CONFIG, "reader-" + UUID.randomUUID());
@@ -173,9 +200,11 @@ class DetectionKafkaIntegrationTest {
       consumer.subscribe(List.of(DetectionTopology.ASSESSMENT_TOPIC));
       long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
       while (System.nanoTime() < deadline)
-        for (var record : consumer.poll(Duration.ofMillis(500))) return record.value().status();
+        for (var record : consumer.poll(Duration.ofMillis(500))) {
+          if (transactionId.equals(record.key())) return record.value().status();
+        }
     }
-    throw new AssertionError("ASSESSMENT_NOT_OBSERVED_READ_COMMITTED");
+    throw new AssertionError("ASSESSMENT_NOT_OBSERVED_READ_COMMITTED: " + transactionId);
   }
 
   private static <T> KafkaProducer<String, T> producer(JsonSerde<T> serde) {

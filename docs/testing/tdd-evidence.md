@@ -161,6 +161,16 @@ docker compose --project-name fraud-engine-smoke --env-file .env.example down -v
 
 Essa lacuna de registro TDD é uma limitação documental da unidade, não deve ser reescrita como um ciclo que não foi capturado.
 
+## Correção — reparticionamento por cliente
+
+| Comportamento | Vermelho observado | Verde observado |
+|---|---|---|
+| Topologia declara a fronteira de reparticionamento | a descrição compilada não continha source/sink de reparticionamento entre `selectKey` e os stores por cliente | `customer-repartition` aparece na topologia antes de `customer-deduplication` e `customer-history` |
+| Regra stateful reúne eventos do cliente entre partições | com Kafka real e duas partições, eventos do mesmo cliente enviados em `0`, `1`, `0` terminavam em `NOT_SUSPICIOUS`, `NOT_SUSPICIOUS`, `NOT_SUSPICIOUS` | após `repartition`, a sequência termina em `NOT_SUSPICIOUS`, `NOT_SUSPICIOUS`, `SUSPICIOUS` |
+| Smoke demonstra regras stateless e stateful | o smoke exercitava apenas a regra monetária e não demonstrava distribuição entre partições | três chaves fixas caem nas partições `2`, `10`, `9`; a terceira transação de baixo valor aciona `COUNT_WINDOW`, e o resumo exibe as evidências |
+
+O registro da U5 acima permanece como evidência histórica do escopo original. O smoke atual o estende com uma segunda regra e, portanto, produz dois e-mails legítimos; o replay da solicitação stateless continua sem duplicar sua entrega.
+
 ## Teste de carga e evidência de capacidade
 
 | Comportamento | Vermelho observado | Verde observado |

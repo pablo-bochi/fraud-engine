@@ -12,10 +12,10 @@ A suíte separa provas rápidas de domínio e contrato das integrações que exi
 | domínio | JUnit 5 e AssertJ | DSL, composição, janela, agregação e IDs determinísticos |
 | REST/segurança | Spring MockMvc e chaves RSA efêmeras | assinatura, `iss`, `aud`, `exp`, `sub`, RBAC e rejeição de identidade no body |
 | persistência | Testcontainers PostgreSQL | proposta/auditoria atômicas, snapshot/outbox, concorrência, rollback e entrega idempotente |
-| Kafka Streams | `TopologyTestDriver` | ruleset dinâmico, stores, event-time, duplicata, conflito e roteamento de saídas |
-| Kafka real | Testcontainers Kafka | processamento transacional e consumo `read_committed` |
+| Kafka Streams | `TopologyTestDriver` | ruleset dinâmico, stores, event-time, duplicata, conflito, roteamento de saídas e presença do reparticionamento por cliente |
+| Kafka real | Testcontainers Kafka | processamento transacional, consumo `read_committed` e regra stateful reunindo o mesmo cliente vindo de partições distintas |
 | SMTP | Testcontainers Mailpit | envio real e contenção do contato no notificador |
-| ponta a ponta | Docker Compose + Bash | regra aprovada, avaliação normal/suspeita, alerta, resultado, replay e um e-mail |
+| ponta a ponta | Docker Compose + Bash | regras stateless/stateful, reparticionamento entre partições, avaliações, alertas, resultados, replay idempotente e dois e-mails legítimos |
 | observabilidade | Compose, Prometheus e dashboard provisionado | scrape dos três serviços, métricas sem alta cardinalidade e inspeção local |
 | desempenho opcional | Python, `confluent-kafka` e stack Compose reduzida | percentis, limite de 500 ms, vazão observada e reconciliação de entradas/avaliações/alertas |
 
@@ -50,6 +50,7 @@ docker compose --env-file .env.example config --quiet
 - Eventos inválidos e conflitos geram referências sanitizadas e não alteram o histórico.
 - Uma avaliação suspeita agrega todas as regras acionadas, escolhe a maior severidade e cria IDs determinísticos.
 - Uma regra stateful sem histórico suficiente torna a avaliação inconclusiva quando nenhuma regra conclusiva acionou.
+- O processamento com estado por cliente ocorre depois de um reparticionamento explícito; o teste com Kafka real envia o mesmo cliente por partições de origem distintas.
 - Aprovação exige outro `sub`, não aceita identidade administrativa no payload, nunca cria conjunto vazio e persiste snapshot/outbox atomicamente.
 - Publicação conserva ordem de versões e pode repetir o mesmo snapshot depois de falha entre Kafka e commit.
 - Repetição de uma notificação já enviada mantém uma linha, uma tentativa e um SMTP.

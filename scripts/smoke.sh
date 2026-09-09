@@ -104,7 +104,32 @@ topic_contains() {
   consume_topic "$topic" | grep -Fq "$value"
 }
 
-mailpit_total_is_one() {
+capture_notification_line() {
+  local transaction_id="$1"
+  local variable_name="$2"
+  local line
+
+  line="$(
+    consume_topic fraud.notification.requested.v1 |
+      grep -F "$transaction_id" |
+      tail -n 1
+  )"
+
+  [[ -n "$line" ]] || return 1
+
+  printf -v "$variable_name" '%s' "$line"
+}
+
+internal_repartition_topic_exists() {
+  compose exec -T kafka \
+    /opt/kafka/bin/kafka-topics.sh \
+    --bootstrap-server kafka:9092 \
+    --list |
+    grep -Fxq 'fraud-detection-engine-customer-repartition'
+}
+
+mailpit_total_is() {
+  local expected="$1"
   local response
 
   response="$(
@@ -119,7 +144,7 @@ mailpit_total_is_one() {
       python3 -c 'import json,sys; print(json.load(sys.stdin)["total"])'
   )"
 
-  [[ "$total" == "1" ]]
+  [[ "$total" == "$expected" ]]
 }
 
 echo "==> Cleaning previous smoke stack"
@@ -175,12 +200,12 @@ CREATE_RESPONSE="$(
     "http://localhost:${CONTROL_PORT}/api/v1/rules"
 )"
 
-RULE_ID="$(
+AMOUNT_RULE_ID="$(
   printf '%s' "$CREATE_RESPONSE" |
     json_field "ruleId"
 )"
 
-RULE_VERSION_ID="$(
+AMOUNT_RULE_VERSION_ID="$(
   printf '%s' "$CREATE_RESPONSE" |
     json_field "ruleVersionId"
 )"
@@ -190,17 +215,61 @@ echo "==> Approving smoke rule"
 curl -fsS \
   -X POST \
   -H "Authorization: Bearer ${APPROVER_TOKEN}" \
-  "http://localhost:${CONTROL_PORT}/api/v1/rules/${RULE_ID}/versions/${RULE_VERSION_ID}/approval" \
+  "http://localhost:${CONTROL_PORT}/api/v1/rules/${AMOUNT_RULE_ID}/versions/${AMOUNT_RULE_VERSION_ID}/approval" \
   >/dev/null
+
+echo "==> Creating stateful count rule"
+
+COUNT_CREATE_RESPONSE="$(
+  curl -fsS \
+    -X POST \
+    -H "Authorization: Bearer ${AUTHOR_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{
+      "ruleKey": "smoke-three-in-window",
+      "name": "Smoke three transactions in ten minutes",
+      "definition": {
+        "type": "COUNT_WINDOW",
+        "windowSeconds": 600,
+        "minimumCount": 3
+      }
+    }' \
+    "http://localhost:${CONTROL_PORT}/api/v1/rules"
+)"
+
+COUNT_RULE_ID="$(
+  printf '%s' "$COUNT_CREATE_RESPONSE" |
+    json_field "ruleId"
+)"
+
+COUNT_RULE_VERSION_ID="$(
+  printf '%s' "$COUNT_CREATE_RESPONSE" |
+    json_field "ruleVersionId"
+)"
+
+echo "==> Approving stateful count rule"
+
+COUNT_APPROVAL_RESPONSE="$(
+  curl -fsS \
+    -X POST \
+    -H "Authorization: Bearer ${APPROVER_TOKEN}" \
+    "http://localhost:${CONTROL_PORT}/api/v1/rules/${COUNT_RULE_ID}/versions/${COUNT_RULE_VERSION_ID}/approval"
+)"
+
+RULESET_VERSION="$(
+  printf '%s' "$COUNT_APPROVAL_RESPONSE" |
+    json_field "desiredVersion"
+)"
 
 detection_ready() {
   curl -fsS \
     "http://localhost:${DETECTION_PORT}/actuator/health" |
-    grep -Fq '"status":"UP"'
+    grep -Fq "\"loadedVersion\":${RULESET_VERSION}"
 }
 
 echo "==> Waiting for active ruleset in detection-engine"
 wait_until "detection-engine ruleset readiness" detection_ready
+wait_until "customer repartition topic" internal_repartition_topic_exists
 
 NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 SUFFIX="$(date +%s)"
@@ -211,6 +280,16 @@ NORMAL_EVENT="smoke-normal-event-${SUFFIX}"
 SUSPICIOUS_TX="smoke-suspicious-${SUFFIX}"
 SUSPICIOUS_EVENT="smoke-suspicious-event-${SUFFIX}"
 
+STATEFUL_TX_1="smoke-stateful-tx-1"
+STATEFUL_TX_2="smoke-stateful-tx-2"
+STATEFUL_TX_3="smoke-stateful-tx-3"
+
+STATEFUL_EVENT_1="smoke-stateful-event-1"
+STATEFUL_EVENT_2="smoke-stateful-event-2"
+STATEFUL_EVENT_3="smoke-stateful-event-3"
+
+STATEFUL_CUSTOMER="smoke-stateful-customer"
+
 NORMAL_PAYLOAD="$(
   cat <<EOF
 {"schemaVersion":1,"eventId":"${NORMAL_EVENT}","transactionId":"${NORMAL_TX}","customerId":"smoke-customer","amountMinor":5000,"currency":"BRL","occurredAt":"${NOW}","transactionType":"PURCHASE","channel":"APP","merchantCountry":"BR","deviceIdHash":"sha256:smoke-device","traceId":"smoke-trace-normal"}
@@ -220,6 +299,24 @@ EOF
 SUSPICIOUS_PAYLOAD="$(
   cat <<EOF
 {"schemaVersion":1,"eventId":"${SUSPICIOUS_EVENT}","transactionId":"${SUSPICIOUS_TX}","customerId":"smoke-customer","amountMinor":15000,"currency":"BRL","occurredAt":"${NOW}","transactionType":"PURCHASE","channel":"APP","merchantCountry":"BR","deviceIdHash":"sha256:smoke-device","traceId":"smoke-trace-suspicious"}
+EOF
+)"
+
+STATEFUL_PAYLOAD_1="$(
+  cat <<EOF
+{"schemaVersion":1,"eventId":"${STATEFUL_EVENT_1}","transactionId":"${STATEFUL_TX_1}","customerId":"${STATEFUL_CUSTOMER}","amountMinor":100,"currency":"BRL","occurredAt":"${NOW}","transactionType":"PURCHASE","channel":"APP","merchantCountry":"BR","deviceIdHash":"sha256:smoke-stateful-device","traceId":"smoke-trace-stateful-1"}
+EOF
+)"
+
+STATEFUL_PAYLOAD_2="$(
+  cat <<EOF
+{"schemaVersion":1,"eventId":"${STATEFUL_EVENT_2}","transactionId":"${STATEFUL_TX_2}","customerId":"${STATEFUL_CUSTOMER}","amountMinor":100,"currency":"BRL","occurredAt":"${NOW}","transactionType":"PURCHASE","channel":"APP","merchantCountry":"BR","deviceIdHash":"sha256:smoke-stateful-device","traceId":"smoke-trace-stateful-2"}
+EOF
+)"
+
+STATEFUL_PAYLOAD_3="$(
+  cat <<EOF
+{"schemaVersion":1,"eventId":"${STATEFUL_EVENT_3}","transactionId":"${STATEFUL_TX_3}","customerId":"${STATEFUL_CUSTOMER}","amountMinor":100,"currency":"BRL","occurredAt":"${NOW}","transactionType":"PURCHASE","channel":"APP","merchantCountry":"BR","deviceIdHash":"sha256:smoke-stateful-device","traceId":"smoke-trace-stateful-3"}
 EOF
 )"
 
@@ -234,6 +331,48 @@ produce_transaction() {
       --topic fraud.transaction.received.v1 \
       --property parse.key=true \
       --property "key.separator=|"
+}
+
+stateful_transactions_are_in_expected_partitions() {
+  local transactions
+
+  transactions="$(
+    compose exec -T kafka \
+      /opt/kafka/bin/kafka-console-consumer.sh \
+      --bootstrap-server kafka:9092 \
+      --topic fraud.transaction.received.v1 \
+      --from-beginning \
+      --timeout-ms 1500 \
+      --property print.partition=true \
+      --property print.key=true \
+      --property "key.separator=|" \
+      2>/dev/null
+  )" || return 1
+
+  printf '%s' "$transactions" | grep -F "Partition:2" | grep -Fq "${STATEFUL_TX_1}|" &&
+    printf '%s' "$transactions" | grep -F "Partition:10" | grep -Fq "${STATEFUL_TX_2}|" &&
+    printf '%s' "$transactions" | grep -F "Partition:9" | grep -Fq "${STATEFUL_TX_3}|"
+}
+
+assessments_have_expected_statuses() {
+  local assessments
+
+  assessments="$(consume_topic fraud.assessment.created.v1)"
+
+  printf '%s' "$assessments" | grep -F "$NORMAL_TX" | grep -Fq '"status":"NOT_SUSPICIOUS"' &&
+    printf '%s' "$assessments" | grep -F "$SUSPICIOUS_TX" | grep -Fq '"status":"SUSPICIOUS"' &&
+    printf '%s' "$assessments" | grep -F "$STATEFUL_TX_1" | grep -Fq '"status":"NOT_SUSPICIOUS"' &&
+    printf '%s' "$assessments" | grep -F "$STATEFUL_TX_2" | grep -Fq '"status":"NOT_SUSPICIOUS"' &&
+    printf '%s' "$assessments" | grep -F "$STATEFUL_TX_3" | grep -Fq '"status":"SUSPICIOUS"'
+}
+
+notification_results_are_sent() {
+  local results
+
+  results="$(consume_topic fraud.notification.result.v1)"
+
+  printf '%s' "$results" | grep -F "$NOTIFICATION_REQUEST_ID" | grep -Fq '"status":"SENT"' &&
+    printf '%s' "$results" | grep -F "$STATEFUL_NOTIFICATION_REQUEST_ID" | grep -Fq '"status":"SENT"'
 }
 
 echo "==> Producing normal transaction"
@@ -256,17 +395,35 @@ wait_until \
   fraud.assessment.created.v1 \
   "$SUSPICIOUS_TX"
 
-ASSESSMENTS="$(consume_topic fraud.assessment.created.v1)"
+echo "==> Producing stateful transaction 1 (source partition 2)"
+produce_transaction "$STATEFUL_TX_1" "$STATEFUL_PAYLOAD_1"
+wait_until \
+  "first stateful assessment" \
+  topic_contains \
+  fraud.assessment.created.v1 \
+  "$STATEFUL_TX_1"
 
-printf '%s' "$ASSESSMENTS" |
-  grep -F "$NORMAL_TX" |
-  grep -Fq '"status":"NOT_SUSPICIOUS"' \
-  || fail "Normal transaction was not NOT_SUSPICIOUS"
+echo "==> Producing stateful transaction 2 (source partition 10)"
+produce_transaction "$STATEFUL_TX_2" "$STATEFUL_PAYLOAD_2"
+wait_until \
+  "second stateful assessment" \
+  topic_contains \
+  fraud.assessment.created.v1 \
+  "$STATEFUL_TX_2"
 
-printf '%s' "$ASSESSMENTS" |
-  grep -F "$SUSPICIOUS_TX" |
-  grep -Fq '"status":"SUSPICIOUS"' \
-  || fail "Suspicious transaction was not SUSPICIOUS"
+echo "==> Producing stateful transaction 3 (source partition 9)"
+produce_transaction "$STATEFUL_TX_3" "$STATEFUL_PAYLOAD_3"
+wait_until \
+  "third stateful assessment" \
+  topic_contains \
+  fraud.assessment.created.v1 \
+  "$STATEFUL_TX_3"
+
+wait_until "stateful transactions in source partitions 2, 10 and 9" \
+  stateful_transactions_are_in_expected_partitions
+
+wait_until "expected stateless and stateful assessments" \
+  assessments_have_expected_statuses
 
 echo "==> Waiting for alert"
 
@@ -276,23 +433,20 @@ wait_until \
   fraud.alert.internal.v1 \
   "$SUSPICIOUS_TX"
 
-echo "==> Waiting for notification request"
-
 wait_until \
-  "notification request" \
+  "stateful internal alert" \
   topic_contains \
-  fraud.notification.requested.v1 \
-  "$SUSPICIOUS_TX"
+  fraud.alert.internal.v1 \
+  "$STATEFUL_TX_3"
 
-NOTIFICATION_LINES="$(
-  consume_topic fraud.notification.requested.v1 |
-    grep -F "$SUSPICIOUS_TX"
-)"
+echo "==> Waiting for notification requests"
 
-NOTIFICATION_LINE="$(
-  printf '%s\n' "$NOTIFICATION_LINES" |
-    tail -n 1
-)"
+NOTIFICATION_LINE=""
+wait_until \
+  "stateless notification request" \
+  capture_notification_line \
+  "$SUSPICIOUS_TX" \
+  NOTIFICATION_LINE
 
 NOTIFICATION_REQUEST_ID="${NOTIFICATION_LINE%%|*}"
 NOTIFICATION_PAYLOAD="${NOTIFICATION_LINE#*|}"
@@ -300,25 +454,25 @@ NOTIFICATION_PAYLOAD="${NOTIFICATION_LINE#*|}"
 [[ -n "$NOTIFICATION_REQUEST_ID" ]] \
   || fail "notificationRequestId not found"
 
-echo "==> Waiting for notification result"
-
+STATEFUL_NOTIFICATION_LINE=""
 wait_until \
-  "notification result" \
-  topic_contains \
-  fraud.notification.result.v1 \
-  "$NOTIFICATION_REQUEST_ID"
+  "stateful notification request" \
+  capture_notification_line \
+  "$STATEFUL_TX_3" \
+  STATEFUL_NOTIFICATION_LINE
 
-RESULTS="$(
-  consume_topic fraud.notification.result.v1
-)"
+STATEFUL_NOTIFICATION_REQUEST_ID="${STATEFUL_NOTIFICATION_LINE%%|*}"
 
-printf '%s' "$RESULTS" |
-  grep -F "$NOTIFICATION_REQUEST_ID" |
-  grep -Fq '"status":"SENT"' \
-  || fail "Notification result was not SENT"
+[[ -n "$STATEFUL_NOTIFICATION_REQUEST_ID" ]] \
+  || fail "Stateful notificationRequestId not found"
 
-echo "==> Waiting for Mailpit message"
-wait_until "one Mailpit message" mailpit_total_is_one
+echo "==> Waiting for notification results"
+
+wait_until "stateless and stateful notification results are SENT" \
+  notification_results_are_sent
+
+echo "==> Waiting for Mailpit messages"
+wait_until "two Mailpit messages" mailpit_total_is 2
 
 echo "==> Replaying the same notification request"
 
@@ -376,16 +530,18 @@ MAILPIT_TOTAL="$(
     python3 -c 'import json,sys; print(json.load(sys.stdin)["total"])'
 )"
 
-[[ "$MAILPIT_TOTAL" == "1" ]] \
-  || fail "Expected one Mailpit message after replay, got $MAILPIT_TOTAL"
+[[ "$MAILPIT_TOTAL" == "2" ]] \
+  || fail "Expected two Mailpit messages after replay, got $MAILPIT_TOTAL"
 
 echo
 echo "SMOKE PASSED"
-echo "  normal assessment:      NOT_SUSPICIOUS"
-echo "  suspicious assessment:  SUSPICIOUS"
-echo "  internal alert:          observed"
-echo "  notification request:    $NOTIFICATION_REQUEST_ID"
-echo "  notification result:     SENT + replayed"
-echo "  delivery rows:           1"
-echo "  delivery attempts:       1"
-echo "  Mailpit messages:        1"
+echo "  stateless amount rule:       SUSPICIOUS"
+echo "  stateful count rule:         NOT_SUSPICIOUS, NOT_SUSPICIOUS, SUSPICIOUS"
+echo "  stateful source partitions:  2, 10, 9"
+echo "  internal alerts:             2 observed"
+echo "  stateless notification:      $NOTIFICATION_REQUEST_ID"
+echo "  stateful notification:       $STATEFUL_NOTIFICATION_REQUEST_ID"
+echo "  notification result:         SENT + stateless replayed"
+echo "  stateless delivery rows:     1"
+echo "  stateless delivery attempts: 1"
+echo "  Mailpit messages:            2"
