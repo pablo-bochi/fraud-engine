@@ -21,6 +21,7 @@ import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.kstream.Consumed;
 import org.apache.kafka.streams.kstream.KStream;
 import org.apache.kafka.streams.kstream.Produced;
+import org.apache.kafka.streams.kstream.Repartitioned;
 import org.apache.kafka.streams.kstream.ValueTransformerWithKey;
 import org.apache.kafka.streams.processor.ProcessorContext;
 import org.apache.kafka.streams.state.KeyValueStore;
@@ -147,6 +148,10 @@ public final class DetectionTopology {
             .filter((key, result) -> !result.conflict())
             .selectKey((key, result) -> result.event().customerId())
             .mapValues(IdentityResult::event)
+            .repartition(
+                Repartitioned.<String, TransactionEvent>as("customer")
+                    .withKeySerde(Serdes.String())
+                    .withValueSerde(new JsonSerde<>(TransactionEvent.class)))
             .transformValues(() -> new DeduplicationTransformer(), CUSTOMER_DEDUPLICATION);
 
     deduplicated.peek(

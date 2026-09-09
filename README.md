@@ -39,20 +39,21 @@ docker compose --env-file .env.example config --quiet
 ./scripts/smoke.sh
 ```
 
-O smoke limpa um projeto Compose isolado, compila as aplicações, gera chaves e JWTs locais, sobe a infraestrutura e os três serviços, cria e aprova uma regra, e publica duas transações. O resultado esperado contém:
+O smoke limpa um projeto Compose isolado, compila as aplicações, gera chaves e JWTs locais, sobe a infraestrutura e os três serviços, cria e aprova uma regra stateless de valor e uma regra stateful de contagem. Além das duas transações do fluxo ponta a ponta, publica três transações de baixo valor do mesmo cliente em partições de origem diferentes. O resultado esperado contém:
 
 ```text
 SMOKE PASSED
-  normal assessment:      NOT_SUSPICIOUS
-  suspicious assessment:  SUSPICIOUS
-  internal alert:          observed
-  notification result:     SENT + replayed
-  delivery rows:           1
-  delivery attempts:       1
-  Mailpit messages:        1
+  stateless amount rule:       SUSPICIOUS
+  stateful count rule:         NOT_SUSPICIOUS, NOT_SUSPICIOUS, SUSPICIOUS
+  stateful source partitions:  2, 10, 9
+  internal alerts:             2 observed
+  notification result:         SENT + stateless replayed
+  stateless delivery rows:     1
+  stateless delivery attempts: 1
+  Mailpit messages:            2
 ```
 
-O replay da solicitação produz novamente o mesmo resultado, mas mantém uma única linha de entrega, uma tentativa de SMTP e um e-mail.
+O replay da solicitação stateless produz novamente o mesmo resultado, mas mantém uma única linha e uma tentativa para essa entrega. O segundo e-mail pertence ao alerta stateful.
 
 Para conservar a pilha ao final e inspecionar as evidências:
 
