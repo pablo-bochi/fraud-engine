@@ -17,7 +17,7 @@
 - A deduplicação global de `eventId` entre clientes não existe. Após o reparticionamento, o store é por cliente.
 - Identidade online expira em 24 horas de stream-time; replay posterior pode voltar a ser processado.
 - O histórico de regras stateful é retido por 15 minutos. Não há watermark, espera por reordenação ou correção retroativa.
-- O motor não bloqueia o consumo até conhecer um end offset do tópico de ruleset. Prontidão exige snapshot carregado, mas não prova convergência global.
+- No bootstrap sem nenhum ruleset válido, o filtro da topologia descarta a transação consumida. A prontidão fica negativa, mas não pausa o consumidor, não guarda o evento e não provoca replay quando um ruleset chega depois; o offset pode avançar normalmente. Depois de carregar ao menos um snapshot válido, atualizações inválidas preservam o último ruleset conhecido.
 - Não há coordenação entre múltiplas instâncias para ativação simultânea de uma versão.
 
 ### Regras e operação
@@ -45,14 +45,19 @@
 
 ### Escala e entrega
 
-- As metas de 8.000 TPS, pico de 25.000 TPS e 99,9% em até 500 ms foram testadas no MacBook Air M1 com 4,12 GB atribuídos ao Docker, 12 partições e uma thread do Kafka Streams. A meta de latência foi atingida nos dois cenários-alvo, com 100% das amostras em até 500 ms; as metas de vazão não foram atingidas: 5.717,37 TPS na carga sustentada e 5.749,18 TPS no pico. Todas as 365.000 entradas dos dois cenários-alvo foram reconciliadas, sem perda ou duplicação. Consulte `docs/performance/results.md`; os números não são certificação produtiva.
+- As metas de 8.000 TPS, pico de 25.000 TPS e 99,9% em até 500 ms foram repetidas no MacBook Air M1 com 4,12 GB atribuídos ao Docker, 12 partições, uma thread do Kafka Streams, `exactly_once_v2` e reparticionamento por cliente. A medição corrigida usa o envio aceito pelo produtor até a observação `read_committed`, separadamente para avaliações e alertas. Em uma execução com apenas Kafka e o motor no Docker, a carga sustentada observou 5.252,34 TPS e p99,9 E2E de 18,35 s/17,47 s; o pico observou 2.563,37 TPS e p99,9 de 45,34 s/44,23 s. Ficaram em até 500 ms 26,27%/25,42% das avaliações/alertas na carga sustentada e 0,31%/0,00% no pico. As 365.000 entradas dos dois cenários-alvo foram integralmente reconciliadas, sem perda nem duplicação. Consulte `docs/performance/results.md`; os números antigos de sucesso de latência não são válidos para o caminho completo nem para a topologia reparticionada.
 - Não há tratamento de chaves quentes por salting, múltiplos fluxos ou dimensionamento automático.
 - O dashboard local demonstra sinais, mas não define SLO, paging ou retenção produtiva.
 - Não há automação de CI nesta entrega por decisão de escopo.
 
 ## Evolução recomendada
 
-1. Repetir o benchmark de capacidade com mais recursos, mais threads/instâncias e perfis de chaves, documentando cada configuração e mantendo a reconciliação antes de discutir SLO.
+1. Evoluir a capacidade do motor com um ciclo mensurado, em vez de atribuir a diferença apenas ao hardware:
+
+   - perfilar CPU, RocksDB, changelogs, commits transacionais e distribuição entre partições para localizar o gargalo;
+   - testar progressivamente mais `num.stream.threads` e réplicas do motor, respeitando o limite útil das 12 partições e observando chaves quentes;
+   - separar gerador, broker e motor em recursos dedicados e, conforme o perfil encontrado, ajustar store, cache, batching e intervalo de commit sem enfraquecer `exactly_once_v2`;
+   - repetir uma curva de carga com aquecimento da JVM e dos stores, várias execuções e configuração registrada. Para considerar as metas atingidas, exigir simultaneamente 8.000 TPS sustentados, absorção do pico de 25.000 TPS, taxa de saída compatível com a entrada, retorno do lag a zero, reconciliação integral e p99,9 E2E de avaliações e alertas em até 500 ms. Aumentar threads ou recursos isoladamente não garante o SLO.
 2. Ensaiar restauração de changelogs, indisponibilidade e múltiplas instâncias; medir tempo de convergência e tamanho dos stores.
 3. Adicionar IdP corporativo, MSK IAM/TLS, Secrets Manager/KMS, ACLs por tópico e identidade de workload.
 4. Criar arquivo de entrada criptografado, investigação com acesso restrito e replay auditado com notificações bloqueadas.

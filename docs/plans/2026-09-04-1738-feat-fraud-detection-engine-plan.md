@@ -1080,7 +1080,7 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
 - **Abordagem:**
   1. Usar um produtor/consumidor Kafka leve com semente fixa e dados únicos; evitar construir uma plataforma de carga própria.
   2. Reconciliar eventos únicos enviados com avaliações e alertas lidos em `read_committed`.
-  3. Medir `readCommittedObservedAt - engineReceivedAt` como limite superior da publicação durável e relatar separadamente a latência desde o produtor.
+  3. Medir separadamente avaliações e alertas pelo relógio monotônico entre o envio aceito pelo produtor e a observação `read_committed`. O intervalo iniciado em `evaluatedAt`/`alertCreatedAt` é apenas diagnóstico, pois não inclui a fila de entrada nem a avaliação.
   4. Executar aquecimento, 8.000 TPS sustentados e 25.000 TPS de pico apenas enquanto a máquina permanecer estável.
   5. Registrar hardware, containers, partições, threads, ruleset, duração, vazão alcançada, p50/p95/p99/p99.9/máximo, percentual em até 500 ms, atraso de consumo, perdas e duplicações.
 - **Padrões a seguir:** Semente fixa, relatório reproduzível e nenhuma extrapolação do notebook para produção.
@@ -1146,7 +1146,7 @@ ECS reduz a superfície operacional quando as aplicações não precisam de APIs
 
 O CI normal executa testes de schema, compilação e testes unitários. A integração com Docker pode executar em uma tarefa separada quando permanecer estável no runner. A prontidão da entrega exige build obrigatório, smoke, segurança/privacidade essencial e ensaio a partir de checkout limpo. U6 e U8 nunca bloqueiam esse conjunto.
 
-Se U8 for executada, a evidência dos 500 ms usa `readCommittedObservedAt - engineReceivedAt`. Como a observação ocorre depois da confirmação, um valor dentro do limite comprova que a publicação durável ocorreu no máximo até esse limite superior. O relatório deve declarar se o ambiente local alcançou 8.000/25.000 TPS; raciocínio arquitetural não substitui uma medição malsucedida, e sucesso no notebook não certifica produção.
+Se U8 for executada, a evidência dos 500 ms usa o intervalo monotônico entre o envio aceito pelo produtor e a observação `read_committed`, separadamente para avaliações e alertas. Como a observação ocorre depois da confirmação, um valor dentro do limite comprova um limite superior conservador para o caminho ponta a ponta observado. O relatório deve declarar se o ambiente local alcançou 8.000/25.000 TPS; raciocínio arquitetural não substitui uma medição malsucedida, e sucesso no notebook não certifica produção.
 
 ---
 

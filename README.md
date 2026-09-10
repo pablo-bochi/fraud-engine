@@ -171,6 +171,6 @@ O inventário completo de tópicos, chaves e retenções está em [docs/architec
 
 ## Escopo honesto
 
-O MVP executa o núcleo local, incluindo a pilha de observabilidade com Prometheus, Grafana e Kafka UI. O benchmark local reproduzível de capacidade atingiu a meta de 99,9% em até 500 ms, mas não atingiu as metas de vazão de 8.000 TPS e pico de 25.000 TPS no ambiente medido. O MVP não executa replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
+O MVP executa o núcleo local, incluindo a pilha de observabilidade com Prometheus, Grafana e Kafka UI. Depois da correção da medida ponta a ponta e da inclusão do reparticionamento por cliente, o benchmark local reconciliou todas as saídas, mas não atingiu as metas de 500 ms, 8.000 TPS sustentados ou pico de 25.000 TPS. O MVP também não protege o bootstrap sem ruleset: prontidão negativa não pausa nem guarda transações já consumidas. Ele não executa replay/backtest, operação automática da quarentena, segurança corporativa AWS, múltiplas instâncias coordenadas ou reconciliação do intervalo ambíguo do SMTP. A automação de CI foi removida do escopo desta entrega por decisão explícita; os comandos de verificação permanecem reproduzíveis localmente.
 
 Veja [docs/limitations-and-evolution.md](docs/limitations-and-evolution.md) e [docs/ai-usage.md](docs/ai-usage.md).
