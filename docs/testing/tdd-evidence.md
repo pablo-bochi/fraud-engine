@@ -181,6 +181,16 @@ O registro da U5 acima permanece como evidência histórica do escopo original. 
 | Kafka real em baixa taxa | antes do ensaio não havia prova de integração do produtor/consumidor Python com as saídas transacionais | 200 entradas a 100 TPS produziram 200 avaliações e 1 alerta, sem perda ou duplicação, via consumidor `read_committed` |
 | carga completa | a primeira tentativa encerrou corretamente com `missing assessments=33352, missing alerts=1` após o timeout de 240 s e não gravou relatório | após remover trabalho quadrático do consumidor de medição, uma repetição em stack limpa com timeout de 600 s reconciliou 370.000 entradas, 370.000 avaliações e 370 alertas nos três cenários; atingiu a meta de latência e preservou como não atingidas as metas de vazão |
 
+### Correção da evidência de latência após o reparticionamento
+
+| Comportamento | Vermelho observado | Verde observado |
+|---|---|---|
+| critério de 500 ms | o resultado sintético só possuía uma distribuição parcial baseada no timestamp final do motor | avaliações e alertas possuem distribuições E2E independentes, e ambas precisam alcançar 99,9% em até 500 ms |
+| observador acompanha as saídas | uma chamada a `poll()` retirava apenas uma mensagem e podia criar backlog na própria ferramenta | uma thread dedicada, independente do produtor, solicita até 1.000 saídas por chamada e captura o instante do lote antes da desserialização |
+| carga real corrigida | o relatório antigo promovia `receivedAt == evaluatedAt` a início da latência e havia sido executado antes do reparticionamento | em stack limpa contendo somente Kafka e o motor, os cenários-alvo reconciliaram 365.000 entradas sem perda nem duplicação; a carga sustentada observou 5.252,34 TPS e p99,9 E2E de 18,35 s/17,47 s, e o pico observou 2.563,37 TPS e 45,34 s/44,23 s; nenhuma meta foi atingida |
+
+O registro histórico da U8 acima descreve corretamente o ciclo executado naquela época, mas a conclusão de latência foi substituída pela medição corrigida em `docs/performance/results.md`.
+
 Comandos executados nesta unidade:
 
 ```bash

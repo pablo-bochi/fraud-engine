@@ -21,12 +21,29 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Protocol, Sequence, TypeVar
 
 TRANSACTION_TOPIC = "fraud.transaction.received.v1"
 RULESET_TOPIC = "fraud.ruleset.active.v1"
 ASSESSMENT_TOPIC = "fraud.assessment.created.v1"
 ALERT_TOPIC = "fraud.alert.internal.v1"
+OUTPUT_CONSUME_BATCH_SIZE = 1_000
+MessageT = TypeVar("MessageT")
+
+
+class BatchConsumer(Protocol[MessageT]):
+    def consume(self, *, num_messages: int, timeout: float) -> list[MessageT]: ...
+
+
+def consume_output_batches(
+    consumer: BatchConsumer[MessageT],
+    stop: threading.Event,
+    handle: Callable[[list[MessageT]], None],
+) -> None:
+    while not stop.is_set():
+        messages = consumer.consume(num_messages=OUTPUT_CONSUME_BATCH_SIZE, timeout=0.05)
+        if messages:
+            handle(messages)
 
 
 class IntegrityError(RuntimeError):
@@ -137,37 +154,12 @@ class ScenarioResult:
     alerts: int
     producer_tps: float
     observed_tps: float
-    durable_latency: LatencySummary
-    producer_latency: LatencySummary
+    assessment_end_to_end_latency: LatencySummary
+    alert_end_to_end_latency: LatencySummary
+    assessment_post_evaluation_latency: LatencySummary
+    alert_post_evaluation_latency: LatencySummary
     max_consumer_lag: int
     reconciliation: Reconciliation
-
-    @classmethod
-    def synthetic(
-        cls,
-        *,
-        name: str,
-        target_tps: int,
-        duration_seconds: float,
-        sent: int,
-        alerts: int,
-        durable_latencies_ms: Sequence[float],
-        producer_latencies_ms: Sequence[float],
-        max_consumer_lag: int,
-    ) -> "ScenarioResult":
-        return cls(
-            name,
-            target_tps,
-            duration_seconds,
-            sent,
-            alerts,
-            sent / duration_seconds,
-            sent / duration_seconds,
-            LatencySummary.from_samples(durable_latencies_ms),
-            LatencySummary.from_samples(producer_latencies_ms),
-            max_consumer_lag,
-            Reconciliation(sent, sent, alerts, 0, 0, 0, 0, 0, 0),
-        )
 
     @property
     def throughput_met(self) -> bool:
@@ -175,7 +167,10 @@ class ScenarioResult:
 
     @property
     def latency_met(self) -> bool:
-        return self.durable_latency.within_500ms_percent >= 99.9
+        return (
+            self.assessment_end_to_end_latency.within_500ms_percent >= 99.9
+            and self.alert_end_to_end_latency.within_500ms_percent >= 99.9
+        )
 
 
 @dataclass(frozen=True)
@@ -187,6 +182,11 @@ class Scenario:
 
 def _number(value: float) -> str:
     return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def _render_latency_row(label: str, summary: LatencySummary) -> str:
+    values = (summary.p50, summary.p95, summary.p99, summary.p999, summary.maximum)
+    return f"| {label} | " + " | ".join(f"{_number(value)} ms" for value in values) + " |"
 
 
 def render_results_markdown(
@@ -214,13 +214,15 @@ def render_results_markdown(
         "",
         "## Resultados",
         "",
-        "| Cenario | Meta | Envio | Vazao observada | <= 500 ms | Vazao | Latencia |",
-        "|---|---:|---:|---:|---:|---|---|",
+        "| Cenario | Meta | Envio | Vazao observada | avaliacoes <= 500 ms | alertas <= 500 ms | Vazao | Latencia E2E |",
+        "|---|---:|---:|---:|---:|---:|---|---|",
     ]
     for result in results:
         lines.append(
             f"| {result.name} | {_number(result.target_tps)} TPS | {_number(result.producer_tps)} TPS | "
-            f"{_number(result.observed_tps)} TPS | {_number(result.durable_latency.within_500ms_percent)}% | "
+            f"{_number(result.observed_tps)} TPS | "
+            f"{_number(result.assessment_end_to_end_latency.within_500ms_percent)}% | "
+            f"{_number(result.alert_end_to_end_latency.within_500ms_percent)}% | "
             f"{'ATINGIDA' if result.throughput_met else 'NAO ATINGIDA'} | "
             f"{'ATINGIDA' if result.latency_met else 'NAO ATINGIDA'} |"
         )
@@ -232,30 +234,22 @@ def render_results_markdown(
                 "",
                 "| Medida | p50 | p95 | p99 | p99,9 | maximo |",
                 "|---|---:|---:|---:|---:|---:|",
-                "| `readCommittedObservedAt - engineReceivedAt/alertCreatedAt` | "
-                + " | ".join(
-                    f"{_number(value)} ms"
-                    for value in (
-                        result.durable_latency.p50,
-                        result.durable_latency.p95,
-                        result.durable_latency.p99,
-                        result.durable_latency.p999,
-                        result.durable_latency.maximum,
-                    )
-                )
-                + " |",
-                "| observacao `read_committed` - envio do produtor | "
-                + " | ".join(
-                    f"{_number(value)} ms"
-                    for value in (
-                        result.producer_latency.p50,
-                        result.producer_latency.p95,
-                        result.producer_latency.p99,
-                        result.producer_latency.p999,
-                        result.producer_latency.maximum,
-                    )
-                )
-                + " |",
+                _render_latency_row(
+                    "avaliacao E2E: observacao `read_committed` - envio aceito pelo produtor",
+                    result.assessment_end_to_end_latency,
+                ),
+                _render_latency_row(
+                    "alerta E2E: observacao `read_committed` - envio aceito pelo produtor",
+                    result.alert_end_to_end_latency,
+                ),
+                _render_latency_row(
+                    "diagnostico da avaliacao: observacao `read_committed` - `evaluatedAt`",
+                    result.assessment_post_evaluation_latency,
+                ),
+                _render_latency_row(
+                    "diagnostico do alerta: observacao `read_committed` - `createdAt`",
+                    result.alert_post_evaluation_latency,
+                ),
                 "",
                 f"Integridade: {result.reconciliation.inputs} entradas unicas, "
                 f"{result.reconciliation.assessments} avaliacoes, {result.alerts} alertas, "
@@ -268,7 +262,7 @@ def render_results_markdown(
         [
             "## Interpretacao",
             "",
-            "A vazao observada considera o intervalo entre o primeiro envio e a observacao da ultima avaliacao/alerta esperado. A latencia duravel usa `receivedAt` nas avaliacoes, `createdAt` nos alertas e o instante em que o consumidor `read_committed` recebeu o registro, portanto e um limite superior da publicacao duravel. A latencia desde o produtor e apresentada separadamente.",
+            "A vazao observada considera o intervalo entre o primeiro envio e a observacao da ultima avaliacao/alerta esperado. A meta de latencia usa, separadamente para avaliacoes e alertas, o intervalo monotono entre o envio aceito pelo produtor e a observacao da saida por um consumidor `read_committed`. Ela inclui fila do produtor, entrada no Kafka, reparticionamento, espera da tarefa, avaliacao, commit transacional, saida no Kafka e atraso do observador; por isso e um limite superior conservador do tempo ponta a ponta deste ensaio. As medidas iniciadas em `evaluatedAt`/`createdAt` sao apenas diagnosticas e nao decidem a meta de 500 ms.",
             "",
         ]
     )
@@ -373,110 +367,162 @@ class ScenarioRunner:
         assessment_duplicates: set[str] = set()
         alerts: set[str] = set()
         alert_duplicates: set[str] = set()
-        durable: list[float] = []
-        producer_latency: list[float] = []
+        assessment_end_to_end: list[float] = []
+        alert_end_to_end: list[float] = []
+        assessment_post_evaluation: list[float] = []
+        alert_post_evaluation: list[float] = []
         max_lag = 0
         observed_messages = 0
         suspicious_assessments = 0
         started = time.perf_counter()
         first_sent = started
         last_output = started
+        state_lock = threading.Lock()
+        observer_stop = threading.Event()
+        observer_errors: list[Exception] = []
 
-        def observe(wait: float = 0.0) -> None:
+        def handle_messages(messages: list[object]) -> None:
             nonlocal max_lag, last_output, observed_messages, suspicious_assessments
-            message = self.consumer.poll(wait)
-            if message is None:
-                return
-            if message.error():
-                if message.error().code() != self.kafka_error._PARTITION_EOF:
-                    raise RuntimeError(str(message.error()))
-                return
             observed_perf, observed_at = time.perf_counter(), _now()
-            document = json.loads(message.value())
-            event_id = document.get("eventId")
-            if event_id not in sent:
-                return
-            observed_messages += 1
-            if message.topic() == ASSESSMENT_TOPIC:
-                if event_id in assessments:
-                    assessment_duplicates.add(event_id)
-                else:
-                    assessments[event_id] = document["status"]
-                    suspicious_assessments += document["status"] == "SUSPICIOUS"
-                    durable.append(max(0.0, (observed_at - _instant(document["receivedAt"])).total_seconds() * 1000))
-                    producer_latency.append((observed_perf - sent_at[event_id]) * 1000)
-                    last_output = observed_perf
-            elif message.topic() == ALERT_TOPIC:
-                if event_id in alerts:
-                    alert_duplicates.add(event_id)
-                else:
-                    alerts.add(event_id)
-                    durable.append(
-                        max(
-                            0.0,
-                            (observed_at - _instant(document["createdAt"])).total_seconds()
-                            * 1000,
-                        )
-                    )
-                    producer_latency.append((observed_perf - sent_at[event_id]) * 1000)
-                    last_output = observed_perf
-            if observed_messages % 1_000 == 0:
-                lag = 0
-                partitions = self.consumer.assignment()
-                positions = self.consumer.position(partitions)
-                for partition, position in zip(partitions, positions, strict=True):
-                    _, high = self.consumer.get_watermark_offsets(partition, cached=True)
-                    lag += max(0, high - position.offset) if position.offset >= 0 else 0
-                max_lag = max(max_lag, lag)
+            for message in messages:
+                if message.error():
+                    if message.error().code() != self.kafka_error._PARTITION_EOF:
+                        raise RuntimeError(str(message.error()))
+                    continue
+                document = json.loads(message.value())
+                event_id = document.get("eventId")
+                sample_lag = False
+                with state_lock:
+                    if event_id not in sent:
+                        continue
+                    observed_messages += 1
+                    end_to_end_ms = (observed_perf - sent_at[event_id]) * 1000
+                    if message.topic() == ASSESSMENT_TOPIC:
+                        if event_id in assessments:
+                            assessment_duplicates.add(event_id)
+                        else:
+                            assessments[event_id] = document["status"]
+                            suspicious_assessments += document["status"] == "SUSPICIOUS"
+                            assessment_end_to_end.append(end_to_end_ms)
+                            assessment_post_evaluation.append(
+                                max(
+                                    0.0,
+                                    (observed_at - _instant(document["evaluatedAt"]))
+                                    .total_seconds()
+                                    * 1000,
+                                )
+                            )
+                            last_output = observed_perf
+                    elif message.topic() == ALERT_TOPIC:
+                        if event_id in alerts:
+                            alert_duplicates.add(event_id)
+                        else:
+                            alerts.add(event_id)
+                            alert_end_to_end.append(end_to_end_ms)
+                            alert_post_evaluation.append(
+                                max(
+                                    0.0,
+                                    (observed_at - _instant(document["createdAt"]))
+                                    .total_seconds()
+                                    * 1000,
+                                )
+                            )
+                            last_output = observed_perf
+                    sample_lag = observed_messages % 1_000 == 0
+                if sample_lag:
+                    lag = 0
+                    partitions = self.consumer.assignment()
+                    positions = self.consumer.position(partitions)
+                    for partition, position in zip(partitions, positions, strict=True):
+                        _, high = self.consumer.get_watermark_offsets(partition, cached=True)
+                        lag += max(0, high - position.offset) if position.offset >= 0 else 0
+                    with state_lock:
+                        max_lag = max(max_lag, lag)
 
-        for index in range(total):
-            target_at = started + index / scenario.target_tps
-            while (remaining := target_at - time.perf_counter()) > 0:
-                observe(min(remaining, 0.001))
-                self.producer.poll(0)
-            event_id, transaction_id = f"{prefix}-e-{index}", f"{prefix}-t-{index}"
-            payload = {
-                "schemaVersion": 1,
-                "eventId": event_id,
-                "transactionId": transaction_id,
-                "customerId": f"u8-customer-{rng.randrange(10_000):05d}",
-                "amountMinor": 15000 if index % self.alert_every == 0 else rng.randrange(100, 9900),
-                "currency": "BRL",
-                "occurredAt": _now().isoformat().replace("+00:00", "Z"),
-                "transactionType": "PURCHASE",
-                "channel": "APP",
-                "merchantCountry": "BR",
-                "deviceIdHash": f"sha256:u8-{rng.randrange(1_000_000):06d}",
-                "traceId": f"{prefix}-trace-{index}",
-            }
-            while True:
-                try:
-                    sent_at[event_id] = time.perf_counter()
-                    self.producer.produce(
-                        TRANSACTION_TOPIC,
-                        key=transaction_id.encode(),
-                        value=json.dumps(payload, separators=(",", ":")).encode(),
+        def observe_outputs() -> None:
+            try:
+                consume_output_batches(self.consumer, observer_stop, handle_messages)
+            except Exception as error:
+                with state_lock:
+                    observer_errors.append(error)
+
+        def raise_observer_error() -> None:
+            with state_lock:
+                if observer_errors:
+                    raise observer_errors[0]
+
+        observer = threading.Thread(target=observe_outputs, name="load-test-output-observer")
+        observer.start()
+        try:
+            for index in range(total):
+                target_at = started + index / scenario.target_tps
+                while (remaining := target_at - time.perf_counter()) > 0:
+                    self.producer.poll(0)
+                    time.sleep(min(remaining, 0.001))
+                event_id, transaction_id = f"{prefix}-e-{index}", f"{prefix}-t-{index}"
+                payload = {
+                    "schemaVersion": 1,
+                    "eventId": event_id,
+                    "transactionId": transaction_id,
+                    "customerId": f"u8-customer-{rng.randrange(10_000):05d}",
+                    "amountMinor": (
+                        15000 if index % self.alert_every == 0 else rng.randrange(100, 9900)
+                    ),
+                    "currency": "BRL",
+                    "occurredAt": _now().isoformat().replace("+00:00", "Z"),
+                    "transactionType": "PURCHASE",
+                    "channel": "APP",
+                    "merchantCountry": "BR",
+                    "deviceIdHash": f"sha256:u8-{rng.randrange(1_000_000):06d}",
+                    "traceId": f"{prefix}-trace-{index}",
+                }
+                while True:
+                    accepted_at = time.perf_counter()
+                    with state_lock:
+                        sent.add(event_id)
+                        sent_at[event_id] = accepted_at
+                    try:
+                        self.producer.produce(
+                            TRANSACTION_TOPIC,
+                            key=transaction_id.encode(),
+                            value=json.dumps(payload, separators=(",", ":")).encode(),
+                        )
+                        break
+                    except BufferError:
+                        with state_lock:
+                            sent.remove(event_id)
+                            del sent_at[event_id]
+                        self.producer.poll(0.01)
+                    except Exception:
+                        with state_lock:
+                            sent.remove(event_id)
+                            del sent_at[event_id]
+                        raise
+                if index == 0:
+                    first_sent = accepted_at
+                if index % 100 == 0:
+                    raise_observer_error()
+            production_finished = time.perf_counter()
+            if self.producer.flush(self.timeout):
+                raise RuntimeError("producer did not flush all records")
+            deadline, complete_since = time.monotonic() + self.timeout, None
+            while time.monotonic() < deadline:
+                raise_observer_error()
+                with state_lock:
+                    complete = (
+                        len(assessments) == total and len(alerts) == suspicious_assessments
                     )
+                if complete and complete_since is None:
+                    complete_since = time.monotonic()
+                if complete_since and time.monotonic() - complete_since >= 1:
                     break
-                except BufferError:
-                    self.producer.poll(0.01)
-                    observe(0)
-            sent.add(event_id)
-            if index == 0:
-                first_sent = sent_at[event_id]
-            if index % 100 == 0:
-                observe(0)
-        production_finished = time.perf_counter()
-        if self.producer.flush(self.timeout):
-            raise RuntimeError("producer did not flush all records")
-        deadline, complete_since = time.monotonic() + self.timeout, None
-        while time.monotonic() < deadline:
-            observe(0.05)
-            complete = len(assessments) == total and len(alerts) == suspicious_assessments
-            if complete and complete_since is None:
-                complete_since = time.monotonic()
-            if complete_since and time.monotonic() - complete_since >= 1:
-                break
+                time.sleep(0.01)
+        finally:
+            observer_stop.set()
+            observer.join(timeout=5)
+        if observer.is_alive():
+            raise RuntimeError("output observer did not stop")
+        raise_observer_error()
         integrity = reconcile(
             sent_event_ids=sent,
             assessments=assessments,
@@ -492,8 +538,10 @@ class ScenarioRunner:
             len(alerts),
             total / max(production_finished - first_sent, 0.000001),
             total / max(last_output - first_sent, 0.000001),
-            LatencySummary.from_samples(durable),
-            LatencySummary.from_samples(producer_latency),
+            LatencySummary.from_samples(assessment_end_to_end),
+            LatencySummary.from_samples(alert_end_to_end),
+            LatencySummary.from_samples(assessment_post_evaluation),
+            LatencySummary.from_samples(alert_post_evaluation),
             max_lag,
             integrity,
         )
@@ -619,7 +667,9 @@ def main(argv: Iterable[str] | None = None) -> int:
             results.append(result)
             print(
                 f"  sent={result.sent} assessments={result.reconciliation.assessments} alerts={result.alerts} "
-                f"observed={result.observed_tps:.2f} TPS p99.9={result.durable_latency.p999:.2f} ms",
+                f"observed={result.observed_tps:.2f} TPS "
+                f"assessment-e2e-p99.9={result.assessment_end_to_end_latency.p999:.2f} ms "
+                f"alert-e2e-p99.9={result.alert_end_to_end_latency.p999:.2f} ms",
                 flush=True,
             )
     finally:
@@ -630,6 +680,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         "stream_threads": 1,
         "processing_guarantee": "exactly_once_v2",
         "consumer_isolation": "read_committed",
+        "output_consume_batch_size": OUTPUT_CONSUME_BATCH_SIZE,
+        "scenario_timeout_seconds": args.timeout,
         "containers": collect_containers(args.compose_project),
         "ruleset": describe_ruleset(published_ruleset),
         "alert_every": args.alert_every,

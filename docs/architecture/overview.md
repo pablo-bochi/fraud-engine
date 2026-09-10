@@ -122,7 +122,7 @@ Isso oferece efeitos efetivamente uma vez nas bordas demonstradas. Não é uma a
 | contato ou SMTP falha | entrega `FAILED` com código sanitizado e retry pela mesma identidade | circuit breaker, DLQ e reconciliação SMTP |
 | processo reinicia | changelogs restauram stores do Kafka Streams | capacidade e tempo de restauração testados |
 
-Prontidão do motor exige um ruleset válido. Os endpoints Actuator e as métricas não carregam `customerId`, contato ou payload como label. Logs devem usar somente IDs opacos de correlação.
+Prontidão do motor exige um ruleset válido, mas neste MVP ela é apenas um sinal operacional. Se transações chegarem antes do primeiro snapshot válido, a topologia as filtra; ela não pausa o consumidor, não mantém um buffer e não as reproduz quando o ruleset for carregado. Por isso os roteiros locais publicam e aguardam o ruleset antes de produzir transações. Os endpoints Actuator e as métricas não carregam `customerId`, contato ou payload como label. Logs devem usar somente IDs opacos de correlação.
 
 ### Resposta operacional de SRE
 
@@ -175,7 +175,7 @@ Segurança antes de produção. A documentação descreve o desenho técnico e n
 
 O particionamento por cliente permite paralelismo por partição e mantém consulta de estado local. O tópico de entrada possui 12 partições no ambiente local; o teto real depende de distribuição de chaves, CPU, disco, tamanho dos stores, replicação e restauração. Chaves quentes podem exigir salting e agregação em dois estágios; esse desenho não está implementado.
 
-As metas do case de 8.000 TPS médios, 25.000 TPS de pico e 99,9% das avaliações/alertas observados em até 500 ms foram medidas pelo benchmark de capacidade. Com uma thread do Kafka Streams e 4,12 GB atribuídos ao Docker, a carga sustentada observou 5.717,37 TPS e 100% das amostras em até 500 ms; o pico observou 5.749,18 TPS e 100%. Assim, a meta de latência foi atingida, mas as duas metas de vazão não foram. As 365.000 entradas dos dois cenários-alvo foram integralmente reconciliadas, sem perdas ou duplicações. O protocolo e os percentis completos estão em `docs/performance/`; esses números não certificam produção.
+As metas do case de 8.000 TPS médios, 25.000 TPS de pico e 99,9% das avaliações e alertas em até 500 ms foram repetidas depois do reparticionamento por cliente. A ferramenta corrigida mede do envio aceito pelo produtor até a observação `read_committed` e não usa o timestamp preenchido ao final da avaliação como início do SLO. Com uma thread do Kafka Streams, 4,12 GB atribuídos ao Docker e somente Kafka e o motor em execução no Docker, a carga sustentada observou 5.252,34 TPS e p99,9 E2E de 18,35 s para avaliações e 17,47 s para alertas; o pico observou 2.563,37 TPS e p99,9 de 45,34 s/44,23 s. Ficaram em até 500 ms 26,27%/25,42% das avaliações/alertas na carga sustentada e 0,31%/0,00% no pico. As 365.000 entradas dos dois cenários-alvo foram integralmente reconciliadas, sem perdas ou duplicações. Portanto nenhuma das três metas foi demonstrada neste ambiente. O protocolo e os percentis completos estão em `docs/performance/`; esses números não certificam produção.
 
 A hipótese de dimensionamento é horizontal: cada partição é processada por uma tarefa ativa, e o
 paralelismo máximo de um consumer group fica limitado pelo número de partições. O dimensionamento

@@ -2,7 +2,7 @@
 
 ## Objetivo e limites
 
-Este ensaio verifica, em uma unica maquina, se a implementacao local sustenta 8.000 TPS, absorve um pico de 25.000 TPS e torna 99,9% das avaliacoes e alertas internos visiveis a um consumidor `read_committed` em ate 500 ms depois do horario `receivedAt` registrado pelo motor.
+Este ensaio verifica, em uma unica maquina, se a implementacao local sustenta 8.000 TPS, absorve um pico de 25.000 TPS e torna 99,9% das avaliacoes e 99,9% dos alertas internos visiveis a um consumidor `read_committed` em ate 500 ms depois que o envio e aceito pelo produtor da carga.
 
 O resultado caracteriza somente o hardware, os containers e a configuracao registrados. Ele nao certifica capacidade produtiva, alta disponibilidade, recuperacao de estado ou dimensionamento horizontal.
 
@@ -27,7 +27,7 @@ docker compose \
   up --build -d kafka kafka-init detection-engine
 ```
 
-Somente Kafka, o inicializador de topicos e o motor participam da medicao. O servico de notificacao fica fora para que SMTP e PostgreSQL nao alterem a medida das saidas Kafka do motor. A remocao previa dos volumes evita misturar backlog, ruleset ou stores de outra execucao.
+Somente Kafka, o inicializador de topicos e o motor participam da medicao. O servico de notificacao fica fora para que SMTP e PostgreSQL nao alterem a medida das saidas Kafka do motor. A remocao previa dos volumes evita misturar backlog, ruleset ou stores de outra execucao. A topologia medida inclui o reparticionamento por `customerId` e seus changelogs.
 
 ## Execucao
 
@@ -72,15 +72,17 @@ docker compose \
 
 - Cada evento recebe `eventId`, `transactionId` e `traceId` unicos; a distribuicao de clientes e valores usa a semente `20260907`.
 - O produtor usa `acks=all`, idempotencia, lote e compressao LZ4. A taxa e controlada pelo relogio monotonicamente crescente do host.
-- Um ruleset minimo de limite monetario e publicado antes da carga, e a ferramenta espera `streamsReadiness.loadedVersion > 0`.
-- O consumidor inicia no fim dos topicos de avaliacao e alerta e usa `isolation.level=read_committed`.
+- Um ruleset minimo de limite monetario e publicado antes da carga, e a ferramenta espera `streamsReadiness.loadedVersion > 0`. Isso evita o risco de bootstrap sem regras neste roteiro, mas nao demonstra que o motor pause o consumo quando o ruleset esta ausente.
+- O consumidor inicia no fim dos topicos de avaliacao e alerta, usa `isolation.level=read_committed` e roda numa thread dedicada, desacoplada do ritmo do produtor. Ele drena ate 1.000 mensagens por chamada, e o instante de observacao do lote e capturado antes da desserializacao.
 - Toda entrada deve possuir exatamente uma avaliacao. Toda avaliacao `SUSPICIOUS` deve possuir exatamente um alerta, e nenhuma outra avaliacao pode possuir alerta.
 - Qualquer perda, saida inesperada ou duplicacao encerra o processo com codigo diferente de zero. O relatorio final so e gravado depois da reconciliacao integral.
 
 ## Medidas e criterio
 
-`readCommittedObservedAt - engineReceivedAt/alertCreatedAt` e o limite superior da publicacao duravel: a observacao so ocorre depois da confirmacao da transacao Kafka. Para avaliacoes usa-se `receivedAt`; para alertas usa-se `createdAt`, que corresponde ao mesmo instante de avaliacao no motor. A ferramenta tambem informa separadamente a latencia monotona desde o envio do produtor.
+O criterio principal e o intervalo monotono entre o envio aceito pelo produtor e a observacao `read_committed` da saida. Ele inclui fila do produtor, topico de entrada, reparticionamento, espera da tarefa, avaliacao, commit transacional, topico de saida e atraso do observador. Como a observacao acontece depois de a saida estar duravel, a medida e um limite superior conservador do caminho ponta a ponta deste ensaio.
 
-A vazao observada divide o total reconciliado pelo intervalo entre o primeiro envio e a ultima avaliacao ou alerta esperado. A meta de vazao exige que essa taxa alcance o alvo do cenario. A meta de latencia exige pelo menos 99,9% das amostras em ate 500 ms. Sao registrados p50, p95, p99, p99,9, maximo, maior lag amostrado, perdas e duplicacoes.
+A ferramenta calcula distribuicoes separadas para avaliacoes e alertas. Ambas precisam ter pelo menos 99,9% das amostras em ate 500 ms. `readCommittedObservedAt - evaluatedAt` e `readCommittedObservedAt - alertCreatedAt` sao exibidas apenas para diagnosticar o trecho posterior a avaliacao; elas nao decidem a meta porque nao incluem a espera de entrada nem a propria avaliacao.
+
+A vazao observada divide o total reconciliado pelo intervalo entre o primeiro envio e a ultima avaliacao ou alerta esperado. A meta de vazao exige que essa taxa alcance o alvo do cenario. Sao registrados p50, p95, p99, p99,9, maximo, maior lag amostrado, perdas e duplicacoes. Se a reconciliacao falhar ou expirar, os percentis parciais sao considerados censurados e nao podem ser apresentados como resultado do cenario.
 
 Os numeros medidos nesta sessao estao em [results.md](results.md).

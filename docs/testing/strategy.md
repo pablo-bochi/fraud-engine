@@ -78,6 +78,7 @@ unidade combina:
 
 - caos, perda de broker, restauração longa, múltiplas instâncias e failover PostgreSQL;
 - bootstrap bloqueante até um end offset conhecido e convergência coordenada do ruleset;
+- proteção de transações recebidas antes do primeiro ruleset válido; smoke e carga evitam esse caso ao carregar a regra primeiro, mas não provam pausa, buffer ou replay;
 - DLQ automatizada, investigação/replay da quarentena e retenção protegida de payload bruto;
 - lease de entrega, timeout `SENDING`, ambiguidade após aceite SMTP, circuit breaker e provedor externo;
 - backtest/reprocessamento com `runId` e notificações bloqueadas;
