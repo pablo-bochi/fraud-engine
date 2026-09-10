@@ -52,7 +52,12 @@
 
 ## Evolução recomendada
 
-1. Repetir o benchmark de capacidade com mais recursos, mais threads/instâncias e perfis de chaves, documentando cada configuração e mantendo a reconciliação antes de discutir SLO.
+1. Evoluir a capacidade do motor com um ciclo mensurado, em vez de atribuir a diferença apenas ao hardware:
+
+   - perfilar CPU, RocksDB, changelogs, commits transacionais e distribuição entre partições para localizar o gargalo;
+   - testar progressivamente mais `num.stream.threads` e réplicas do motor, respeitando o limite útil das 12 partições e observando chaves quentes;
+   - separar gerador, broker e motor em recursos dedicados e, conforme o perfil encontrado, ajustar store, cache, batching e intervalo de commit sem enfraquecer `exactly_once_v2`;
+   - repetir uma curva de carga com aquecimento da JVM e dos stores, várias execuções e configuração registrada. Para considerar as metas atingidas, exigir simultaneamente 8.000 TPS sustentados, absorção do pico de 25.000 TPS, taxa de saída compatível com a entrada, retorno do lag a zero, reconciliação integral e p99,9 E2E de avaliações e alertas em até 500 ms. Aumentar threads ou recursos isoladamente não garante o SLO.
 2. Ensaiar restauração de changelogs, indisponibilidade e múltiplas instâncias; medir tempo de convergência e tamanho dos stores.
 3. Adicionar IdP corporativo, MSK IAM/TLS, Secrets Manager/KMS, ACLs por tópico e identidade de workload.
 4. Criar arquivo de entrada criptografado, investigação com acesso restrito e replay auditado com notificações bloqueadas.
